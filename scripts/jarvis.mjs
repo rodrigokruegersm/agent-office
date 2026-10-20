@@ -39,6 +39,7 @@ assert.equal(P('switch back to the office.'), JSON.stringify({ verb: 'focus', wh
 assert.equal(P('Go to the launch bible tab'), JSON.stringify({ verb: 'focus', what: 'launch bible' }));
 assert.equal(P('close the YouTube tab'), JSON.stringify({ verb: 'close', what: 'youtube' }));
 assert.equal(P('search for flights to Lisbon'), JSON.stringify({ verb: 'search', what: 'flights to lisbon' }));
+assert.equal(P('Jarvis, open Pinterest'), JSON.stringify({ verb: 'open', what: 'pinterest' }));
 assert.equal(parse("what's everyone working on?"), null);
 assert.equal(parse('tell the bridged-product session to run the tests'), null);
 console.log('ok    plain tab and app commands are recognised; everything else is left to the chief');

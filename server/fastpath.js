@@ -21,6 +21,7 @@ const TLD = /^([a-z0-9-]+(?:\s*(?:\.|dot)\s*[a-z0-9-]+)*)\s*(?:\.|dot)\s*(com|io
 function tidy(text) {
   return String(text || '').toLowerCase()
     .replace(/[.!?,;:]+$/g, '').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:hey|ok|okay|yo)\s+)?(?:jarvis|chief)\b[\s,.:;!-]*/, '')
     .replace(/^(?:(?:please|can you|could you|would you|hey|ok|okay|now|and)\s+)+/, '')
     .replace(/\s+(?:please|for me|sir|now|real quick)$/g, '').trim();
 }
@@ -65,7 +66,8 @@ export async function fastPath(text, hands, apps) {
   try {
     const r = await tabs(p.verb, { query: p.what });
     const t = r.focused || r.closed || r.reloaded;
-    const name = t?.title ? t.title.split(/ [-–|·] /)[0].slice(0, 60) : pretty(p.what);
+    // "(56) Pinterest" is a page's unread count, not its name.
+    const name = t?.title ? t.title.replace(/^\(\d+\+?\)\s*/, '').split(/ [-–|·] /)[0].slice(0, 60) : pretty(p.what);
     return p.verb === 'focus' ? `Here's ${name}.` : p.verb === 'close' ? `Closed ${name}.` : `Reloading ${name}.`;
   } catch (err) {
     // "Switch to Gmail" with no Gmail tab open: open it instead.
