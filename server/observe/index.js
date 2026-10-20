@@ -35,7 +35,7 @@ const minutes = (env, fallback) => {
 // word for STALE becomes idle (a crashed cron job, a closed laptop lid); idle
 // for GONE walks out. Errors and waits stay until dismissed or GONE_ATTENTION.
 const STALE = minutes('OBSERVE_STALE_MIN', 10);
-const GONE = minutes('OBSERVE_GONE_MIN', 30);
+const GONE = minutes('OBSERVE_GONE_MIN', 180);
 const GONE_ATTENTION = minutes('OBSERVE_ATTENTION_MIN', 12 * 60);
 
 export function observeKey(data) {

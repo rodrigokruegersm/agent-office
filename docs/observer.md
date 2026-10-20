@@ -31,7 +31,7 @@ steps. A Claude Code session also offers `claude --resume <id>` to copy.
 ## When they come and go
 
 - **Working** with no news for 10 minutes becomes idle (`OBSERVE_STALE_MIN`).
-- **Idle** for 30 minutes walks out (`OBSERVE_GONE_MIN`).
+- **Idle** for 3 hours walks out (`OBSERVE_GONE_MIN`), so Jarvis can still reach a session you left a while ago.
 - **Waiting** or **failed** stays up to 12 hours (`OBSERVE_ATTENTION_MIN`), or until you dismiss it.
 - Up to 14 are on the floor at once, with whoever needs you first.
 

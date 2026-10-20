@@ -79,7 +79,7 @@ ok('hooks set waiting and idle, and the office\'s own jobs are skipped');
 o.upsert('cron:old', { source: 'cron', name: 'Old', state: 'working' }, Date.now() - 11 * 60_000);
 o.tick();
 assert.equal(o.list().find((x) => x.id === 'cron:old').state, 'idle');
-o.upsert('cron:ancient', { source: 'cron', name: 'Ancient', state: 'idle' }, Date.now() - 31 * 60_000);
+o.upsert('cron:ancient', { source: 'cron', name: 'Ancient', state: 'idle' }, Date.now() - 181 * 60_000);
 o.tick();
 assert.equal(o.list().find((x) => x.id === 'cron:ancient'), undefined);
 ok('quiet workers go idle, and long-idle ones walk out');

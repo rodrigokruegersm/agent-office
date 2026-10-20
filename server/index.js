@@ -1690,7 +1690,7 @@ function chiefContext(text, agents, repo, channel = GENERAL) {
 // laptop's open tabs. Put before the boss's message, which ends the context.
 async function withJarvisContext(context) {
   const extra = [];
-  const outside = observer.list().filter((a) => a.state !== 'idle' || Date.now() - a.updated < 15 * 60_000).slice(0, 20);
+  const outside = observer.list().filter((a) => a.state !== 'idle' || Date.now() - a.updated < 3 * 60 * 60_000).sort((a, b) => b.updated - a.updated).slice(0, 20);
   if (outside.length) {
     extra.push('Contractors (outside the office):');
     for (const a of outside) {

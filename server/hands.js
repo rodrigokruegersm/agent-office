@@ -43,6 +43,6 @@ export class Hands {
   // For the chief's context: the open tabs, or null if the laptop is away.
   async tabs() {
     if (!this.configured) return null;
-    try { return (await this.call('/tabs', { op: 'list' }, 2500)).tabs; } catch { return null; }
+    try { return (await this.call('/tabs', { op: 'list' }, 6000)).tabs; } catch { return null; }
   }
 }
