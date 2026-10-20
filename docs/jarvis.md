@@ -38,9 +38,34 @@ on he listens all the time:
 - He doesn't listen while he's talking, so he won't answer himself.
 
 Each phrase is transcribed by whisper on the office machine and thrown away
-afterwards. Nothing goes to a cloud speech service. Replies are read aloud in
-the Mac's "Daniel" voice (download an Enhanced version in System Settings,
-Accessibility, Spoken Content, for a better one).
+afterwards. Nothing goes to a cloud speech service.
+
+**His voice** is Piper's British "Alan", recorded on the office machine (about
+a second a line) and played in the office tab, even from a background tab. His
+stock lines ("Yes, sir?", "One moment, sir.") are recorded once and kept.
+Without Piper he falls back to the Mac's "Daniel". To install Piper on the
+office machine:
+
+```bash
+python3.12 -m venv ~/.agent-office/piper/venv
+~/.agent-office/piper/venv/bin/pip install piper-tts
+~/.agent-office/piper/venv/bin/python -m piper.download_voices --data-dir ~/.agent-office/piper/voices en_GB-alan-medium
+```
+
+then turn on the speaker button in the office's top right.
+
+## How fast he is
+
+- **Browser and app commands** ("open Gmail", "switch to the launch doc",
+  "close the YouTube tab", "search for …", "open Spotify") skip the model:
+  `server/fastpath.js` matches them and acts at once. About a second, voice
+  included.
+- **Everything else** goes to one `claude` process kept running between
+  messages (`WarmChief`), on Haiku (`CHIEF_MODEL`). It's restarted every few
+  turns so its history stays short. The laptop's tab list only goes in when
+  you're talking about tabs. Answers take about 5 seconds; if one isn't back in
+  1.5, he says "One moment, sir."
+- The work itself runs on whichever model each job needs, as before.
 
 The pill's dot: blue, listening for his name; cyan, awake or hearing you;
 amber, working it out; green, speaking; red, click the page so the browser
