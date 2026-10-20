@@ -58,6 +58,8 @@ export class Tower {
     this.on = on;
     if (remember) store('tower.on', on ? '1' : '0');
     this.root.hidden = !on || !this.building;
+    // The 3D office's floating name tags belong to the 3D view.
+    document.body.classList.toggle('tower-on', !this.root.hidden);
     for (const b of this.toggle.children) b.classList.toggle('on', (b.dataset.k === 'tower') === (on && !!this.building));
     this.stamp = '';
     this.render();
@@ -139,10 +141,24 @@ export class Tower {
     label.append(counts);
     if (f.about) label.title = f.about;
 
+    // Rooms with something going on get a card; quiet ones a chip below.
+    const body = el('div', 'tw-body');
     const row = el('div', 'tw-rooms');
-    for (const p of projects) row.append(this.room(p));
-    if (!projects.length) row.append(el('div', 'tw-empty', 'No projects on this floor yet'));
-    floor.append(label, row);
+    const quiet = el('div', 'tw-quiet-row');
+    for (const p of projects) {
+      if (p.room.work.length || p.room.done) row.append(this.room(p));
+      else {
+        const chip = el('button', 'tw-chip', p.name);
+        chip.type = 'button';
+        chip.dataset.project = p.name;
+        chip.title = `${p.name} · ${p.host === 'laptop' ? 'MacBook' : 'Mac mini'} · nobody here right now`;
+        quiet.append(chip);
+      }
+    }
+    if (row.children.length) body.append(row);
+    if (quiet.children.length) body.append(quiet);
+    if (!projects.length) body.append(el('div', 'tw-empty', 'No projects on this floor yet'));
+    floor.append(label, body);
     return floor;
   }
 
@@ -228,7 +244,7 @@ export class Tower {
     const t = e.target.closest('[data-kind]');
     if (t?.dataset.kind === 'job') return this.app.openJob(t.dataset.id);
     if (t?.dataset.kind === 'session') return this.external.open(t.dataset.id);
-    const room = e.target.closest('.tw-room[data-project]');
+    const room = e.target.closest('[data-project]');
     if (room) {
       // A quiet room: the project's latest job, if it has one.
       const last = [...this.app.jobs.values()].filter((j) => j.repo === room.dataset.project).sort((a, b) => (b.endedAt || b.createdAt) - (a.endedAt || a.createdAt))[0];
