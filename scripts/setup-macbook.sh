@@ -53,8 +53,9 @@ OFFICE_KEY="$("${SSH[@]}" "$REMOTE" 'cat ~/.agent-office/office-key')"
 (umask 077
  printf '%s\n' "$OBSERVE" > "$DIR/office/observe-key"
  printf '%s' "$PORT" > "$DIR/office/office-port"
- "$NODE" -e 'const [key, observeKey, claude, host] = process.argv.slice(1); process.stdout.write(JSON.stringify({ key, officeUrl: "http://127.0.0.1:" + process.env.PORT, observeKey, browser: "Google Chrome", claude: claude || "claude", host }, null, 2) + "\n")' \
-   "$(cat "$DIR/key")" "$OBSERVE" "$CLAUDE" "MacBook" > "$DIR/config.json")
+ printf '%s' "MacBook" > "$DIR/office/host"
+ "$NODE" -e 'const [key, observeKey, claude, host, port] = process.argv.slice(1); process.stdout.write(JSON.stringify({ key, officeUrl: "http://127.0.0.1:" + port, observeKey, browser: "Google Chrome", claude: claude || "claude", host }, null, 2) + "\n")' \
+   "$(cat "$DIR/key")" "$OBSERVE" "$CLAUDE" "MacBook" "$PORT" > "$DIR/config.json")
 
 say "2/4  Keeping a tunnel to the office open (launchd: $TUNNEL)"
 cat > "$AGENTS/$TUNNEL.plist" <<PLIST
@@ -118,7 +119,7 @@ curl -s -o /dev/null "http://127.0.0.1:$PORT/" || die "The tunnel didn't come up
 say "4/4  Adding the Claude Code hooks here"
 "$NODE" "$REPO/scripts/install-hooks.mjs" --data "$DIR/office"
 
-open "http://localhost:$PORT/?key=$OFFICE_KEY"
+[[ -n "${NO_OPEN:-}" ]] || open "http://localhost:$PORT/?key=$OFFICE_KEY"
 cat <<DONE
 
 The office is open at http://localhost:$PORT (the tunnel keeps it there).

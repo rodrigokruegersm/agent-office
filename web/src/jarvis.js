@@ -8,20 +8,15 @@
 // at http://localhost:4317 (scripts/setup-macbook.sh tunnels it there).
 
 import './jarvis.css';
+import { WAKE, NOISE, SLEEP, encodeWav } from './jarvis-core.js';
 
 const PRE_ROLL = 0.5; // seconds kept from before a phrase starts
 const END_SILENCE = 0.85; // seconds of quiet that end a phrase
 const MIN_PHRASE = 0.45; // shorter than this is a cough, not a word
 const MAX_PHRASE = 20;
 const AWAKE_MS = 25_000; // listening without the name after a reply
-const RATE = 16000;
 
 const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch {} return null; };
-// Whisper's ways of hearing "Jarvis", and its notes for silence and noise.
-const WAKE = (name) => new RegExp(`^\\W*(?:(?:hey|hi|ok|okay|yo)\\W+)?(?:${[name, 'jarvis', 'jervis', 'jarvi', 'jarvus', 'travis', 'javis', 'jarves', 'charvis'].map((w) => w.toLowerCase().replace(/[^a-z]/g, '')).filter(Boolean).join('|')})\\b[\\s,.!?:;-]*`, 'i');
-const NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|you|thank you\.?|thanks for watching!?|\.+)\s*$/i;
-const SLEEP = /^(stop listening|go to sleep|that'?s all|goodnight|good night|sleep)\W*$/i;
-
 export class Jarvis {
   constructor({ api, speech, notify }) {
     Object.assign(this, { api, speech, notify });
@@ -204,29 +199,4 @@ export class Jarvis {
     clearTimeout(this.tick);
     if (this.on) this.tick = setTimeout(() => this.render(), 1000);
   }
-}
-
-// Mono 16 kHz 16-bit WAV, which whisper wants and ffmpeg passes straight through.
-function encodeWav(chunks, rate) {
-  const total = chunks.reduce((n, c) => n + c.length, 0);
-  const ratio = rate / RATE;
-  const n = Math.floor(total / ratio);
-  const flat = new Float32Array(total);
-  let o = 0;
-  for (const c of chunks) { flat.set(c, o); o += c.length; }
-  const out = new DataView(new ArrayBuffer(44 + n * 2));
-  const str = (at, s) => { for (let i = 0; i < s.length; i++) out.setUint8(at + i, s.charCodeAt(i)); };
-  str(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
-  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
-  out.setUint32(24, RATE, true); out.setUint32(28, RATE * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
-  str(36, 'data'); out.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) {
-    // Average the samples each output sample covers: a cheap low-pass.
-    const a = Math.floor(i * ratio), b = Math.min(total, Math.floor((i + 1) * ratio));
-    let s = 0;
-    for (let j = a; j < b; j++) s += flat[j];
-    const v = Math.max(-1, Math.min(1, s / Math.max(1, b - a)));
-    out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
-  }
-  return new Blob([out], { type: 'audio/wav' });
 }

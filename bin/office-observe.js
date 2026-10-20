@@ -4,7 +4,9 @@
 // scripts/install-hooks.mjs. Prints nothing (a UserPromptSubmit hook's output
 // would land in the session's context) and always exits 0.
 
-import { target, post } from './observe-client.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { target, post, dataDir } from './observe-client.js';
 
 const dataArg = process.argv.indexOf('--data');
 let raw = '';
@@ -23,6 +25,10 @@ process.stdin.on('end', async () => {
     tool_name: input.tool_name,
     tool_input: input.tool_input && pick(input.tool_input),
   };
+  // fork: a laptop reporting to an office on another machine says so, and
+  // where the session lives, so Jarvis can reach it there.
+  const host = hostOf(dataArg > 0 ? process.argv[dataArg + 1] : undefined);
+  if (host) Object.assign(body, { host, cwd: input.cwd });
   await post(target(dataArg > 0 ? process.argv[dataArg + 1] : undefined), '/api/observe/claude-hook', body);
   process.exit(0);
 });
@@ -35,4 +41,9 @@ function pick(i) {
     if (typeof i[k] === 'string') out[k] = i[k].slice(0, 200);
   }
   return out;
+}
+
+function hostOf(explicit) {
+  const d = dataDir(explicit);
+  try { return d ? fs.readFileSync(path.join(d, 'host'), 'utf8').trim().slice(0, 40) : ''; } catch { return ''; }
 }

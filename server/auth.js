@@ -11,6 +11,16 @@ const MODES = ['login', 'apikey'];
 export class Auth {
   constructor(dataDir) {
     this.file = path.join(dataDir, 'auth.json');
+    // fork: a long-lived Claude Code login token (`claude setup-token`), for an
+    // office running as a service, where the keychain login isn't reachable.
+    this.tokenFile = path.join(dataDir, 'claude-token');
+    // The plan meters read it from the environment too.
+    if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      try {
+        const t = fs.readFileSync(this.tokenFile, 'utf8').trim();
+        if (/^sk-ant-oat[\w-]{20,}$/.test(t)) process.env.CLAUDE_CODE_OAUTH_TOKEN = t;
+      } catch {}
+    }
     let saved = {};
     try { saved = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch {}
     this.key = typeof saved.key === 'string' ? saved.key : '';
@@ -33,6 +43,12 @@ export class Auth {
   env(base = process.env) {
     const env = { ...base };
     delete env.ANTHROPIC_API_KEY;
+    if (this.mode === 'login' && !env.CLAUDE_CODE_OAUTH_TOKEN) {
+      try {
+        const t = fs.readFileSync(this.tokenFile, 'utf8').trim();
+        if (/^sk-ant-oat[\w-]{20,}$/.test(t)) env.CLAUDE_CODE_OAUTH_TOKEN = t;
+      } catch {}
+    }
     if (this.mode === 'apikey') {
       delete env.ANTHROPIC_AUTH_TOKEN;
       delete env.CLAUDE_CODE_OAUTH_TOKEN;

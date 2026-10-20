@@ -26,7 +26,11 @@ import { TranscriptWatcher } from '../server/observe/claude.js';
 const DIR = process.env.JARVIS_HANDS_DIR || path.join(os.homedir(), '.jarvis-hands');
 const cfg = JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
 const PORT = Number(process.env.JARVIS_HANDS_PORT || cfg.port || 4319);
+// Chromium browsers share Chrome's AppleScript dictionary; the name is
+// written into each script, since AppleScript reads an app's terms when it
+// compiles.
 const BROWSER = cfg.browser || 'Google Chrome';
+if (!/^[\w .-]{1,40}$/.test(BROWSER)) throw new Error(`Bad browser name: ${BROWSER}`);
 const HOST = cfg.host || os.hostname().replace(/\.local$/, '');
 const CLAUDE = cfg.claude || 'claude';
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -48,9 +52,12 @@ function osa(script, args = []) {
   });
 }
 
+// Inside Chrome's dictionary "tab" means a browser tab, so the separator is
+// made before talking to it.
 const LIST = `on run argv
   set out to ""
-  tell application (item 1 of argv)
+  set sep to ASCII character 9
+  tell application "${BROWSER}"
     set wi to 0
     repeat with w in windows
       set wi to wi + 1
@@ -58,7 +65,7 @@ const LIST = `on run argv
       set ti to 0
       repeat with t in tabs of w
         set ti to ti + 1
-        set out to out & wi & tab & ti & tab & (ti = act) & tab & (title of t) & tab & (URL of t) & linefeed
+        set out to out & wi & sep & ti & sep & (ti = act) & sep & (title of t) & sep & (URL of t) & linefeed
       end repeat
     end repeat
   end tell
@@ -66,7 +73,7 @@ const LIST = `on run argv
 end run`;
 
 const FOCUS = `on run argv
-  tell application (item 1 of argv)
+  tell application "${BROWSER}"
     set w to window ((item 2 of argv) as integer)
     set active tab index of w to ((item 3 of argv) as integer)
     set index of w to 1
@@ -75,15 +82,15 @@ const FOCUS = `on run argv
 end run`;
 
 const CLOSE = `on run argv
-  tell application (item 1 of argv) to close tab ((item 3 of argv) as integer) of window ((item 2 of argv) as integer)
+  tell application "${BROWSER}" to close tab ((item 3 of argv) as integer) of window ((item 2 of argv) as integer)
 end run`;
 
 const RELOAD = `on run argv
-  tell application (item 1 of argv) to reload tab ((item 3 of argv) as integer) of window ((item 2 of argv) as integer)
+  tell application "${BROWSER}" to reload tab ((item 3 of argv) as integer) of window ((item 2 of argv) as integer)
 end run`;
 
 const OPEN = `on run argv
-  tell application (item 1 of argv)
+  tell application "${BROWSER}"
     if (count of windows) = 0 then make new window
     tell front window to make new tab with properties {URL:(item 2 of argv)}
     activate

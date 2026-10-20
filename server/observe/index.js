@@ -154,7 +154,8 @@ export class Observer {
     if (this.ownSessions().has(sid)) return { ok: true, skipped: true };
     const id = `claude:${sid}`;
     const cwd = clip(body.cwd, 400);
-    const base = { source: 'claude', name: this.agents.get(id)?.name || projectName(cwd) || 'Claude', project: projectName(cwd), sessionId: sid };
+    const host = clip(body.host, 40);
+    const base = { source: 'claude', name: this.agents.get(id)?.name || projectName(cwd) || 'Claude', project: host ? `${projectName(cwd)} · ${host}` : projectName(cwd), sessionId: sid, ...(host && { host }), ...(cwd && { cwd }) };
     const ev = String(body.hook_event_name || '');
     const msg = clip(body.message, 200);
     if (ev === 'PermissionRequest') {
