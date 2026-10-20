@@ -40,6 +40,12 @@ export class Hands {
   // The chief's routing call on the laptop's Claude login.
   think(body) { return this.call('/think', body, 95_000); }
 
+  // The laptop's project folders, for new work there; [] if it's away.
+  async projects() {
+    if (!this.configured) return [];
+    try { return (await this.call('/projects', {}, 4000)).projects || []; } catch { return []; }
+  }
+
   // For the chief's context: the open tabs, or null if the laptop is away.
   async tabs() {
     if (!this.configured) return null;

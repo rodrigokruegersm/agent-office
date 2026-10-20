@@ -24,7 +24,7 @@ export function canSee(files) {
 const SCHEMA = {
   type: 'object',
   properties: {
-    action: { type: 'string', enum: ['followup', 'new', 'dismiss', 'recall', 'clear', 'standup', 'ask', 'chat', 'tabs', 'app', 'session'] },
+    action: { type: 'string', enum: ['followup', 'new', 'dismiss', 'recall', 'clear', 'standup', 'ask', 'chat', 'tabs', 'app', 'session', 'laptop'] },
     // fork: Jarvis's hands on the boss's laptop, and messages to outside sessions.
     tabOp: { type: 'string', enum: ['list', 'open', 'search', 'focus', 'close', 'reload'] },
     url: { type: 'string' },
@@ -96,6 +96,7 @@ More actions:
 - "tabs": work the browser on the boss's laptop. Set "tabOp": "list" (to answer what's open, answer from "Laptop tabs" with "chat" instead when they're listed), "open" with "url" (a full address; for a well-known site use its real address, e.g. "open Gmail" is https://mail.google.com), "search" with "query" (a web search), "focus" to switch to a tab and "close" or "reload" a tab, each with "query": words from that tab's title or address as listed. Say what you did in a few words, e.g. "Opening Gmail."
 - "app": bring an app on the laptop to the front, "app": its name (e.g. "Spotify", "WhatsApp", "Claude", "Notion Calendar").
 - "session": pass a message to one of the Claude Code sessions listed under "Contractors" (sessions the boss runs outside the office, on this machine or the laptop). Give "sessionId" (exactly as listed) and "brief" (the message, in the boss's words). Only for a session that is idle; if it is working, say it's busy; if it's waiting on the boss, tell them what it is waiting for. Office staff jobs are "followup", never "session".
+- "laptop": start a new Claude Code session on the boss's laptop, in one of "Laptop projects". Give "repo" (exactly one name from Laptop projects), "brief" (the task in the boss's words plus context it needs) and "model" (same sizing as office jobs). Use it when the boss says to do it on the laptop, when the project is only on the laptop, or when the context says office jobs can't run. A project in both places goes to the office unless the boss says laptop or the office can't run jobs.
 For "what's everyone doing" or "status", answer with "chat" from Staff, Queued, Recently finished and Contractors together, briefly: who's busy on what, anything waiting on the boss first.`;
 
 const systemFor = (name) => (name ? BASE + JARVIS(name) : BASE);

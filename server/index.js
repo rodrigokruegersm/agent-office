@@ -1699,7 +1699,9 @@ async function withJarvisContext(context) {
       extra.push(`- ${a.name} (sessionId ${a.id}, ${kind}${a.project ? `, ${a.project}` : ''}): ${a.state === 'waiting' ? 'WAITING ON THE BOSS' : a.state === 'error' ? 'FAILED' : a.state}. ${clip(a.activity, 120)}${a.title ? ` (asked: "${clip(a.title, 80)}")` : ''}`);
     }
   }
-  const tabs = await hands.tabs();
+  const [tabs, laptopProjects] = await Promise.all([hands.tabs(), hands.projects()]);
+  if (laptopProjects.length) extra.push(`Laptop projects: ${laptopProjects.join(', ')}`);
+  if (laptopBrain) extra.push("The office machine isn't signed in to Claude yet, so office jobs can't run: give new work as \"laptop\" in a laptop project, and if the project is only in the office, say the office needs signing in first (the boss double-clicks Finish Jarvis setup).");
   if (tabs) {
     extra.push(`Laptop tabs (${tabs.length}):`);
     for (const t of tabs.slice(0, 40)) {
@@ -1743,6 +1745,10 @@ async function jarvisActs(d) {
         return `You've got ${(r.tabs || []).length} tabs open${names ? `: ${names}` : ''}.`;
       }
       return d.say || 'Done.';
+    }
+    if (d.action === 'laptop') {
+      const r = await hands.call('/start', { project: d.repo, message: String(d.brief || '').trim(), model: d.model });
+      return d.say || `Started on it in ${r.project}, on your laptop.`;
     }
     if (d.action === 'app') {
       await hands.call('/app', { name: d.app });
@@ -1833,6 +1839,10 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     send({ t: 'chief', busy: false, cost: state.chiefCost });
   }
 
+  // fork: new office work while this machine can't run claude would only fail.
+  if (laptopBrain && (d.action === 'new' || (d.action === 'followup' && !state.jobs.some((j) => j.id === d.jobId && j.status === 'working')))) {
+    return say("I can't start work on the office machine until it's signed in to Claude, sir. Double-click Finish Jarvis setup on your desktop, or ask me to do it on the laptop.");
+  }
   if (d.action === 'followup') {
     const job = state.jobs.find((j) => j.id === d.jobId);
     if (job) {
@@ -1881,7 +1891,7 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     return say(clearContext(ids.length ? ids : hired().map((x) => x.id)));
   }
   if (d.action === 'standup') return void runStandup(true);
-  if (d.action === 'tabs' || d.action === 'app' || d.action === 'session') return say(await jarvisActs(d));
+  if (d.action === 'tabs' || d.action === 'app' || d.action === 'session' || d.action === 'laptop') return say(await jarvisActs(d));
   // An answer that is merely about a job gets the same link a follow-up does.
   // Asking "how did that go?" from another channel shouldn't dead-end just
   // because the job has already finished and nothing was passed on.

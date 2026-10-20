@@ -222,6 +222,40 @@ function tellSession({ sessionId, message }) {
   return { sent: true, cwd: s.cwd };
 }
 
+// ---------- new work on this laptop ----------
+
+// Projects are the folders in one place (~/workspaces by default). A new
+// piece of work is a fresh headless Claude Code session in one of them, with
+// edits allowed; the watcher above reports it like any other session.
+const PROJECTS = cfg.projectsRoot || path.join(os.homedir(), 'workspaces');
+const MAX_NEW = 4;
+let started = 0;
+
+function projects() {
+  try {
+    return fs.readdirSync(PROJECTS, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules')
+      .map((d) => d.name).sort((a, b) => a.localeCompare(b));
+  } catch { return []; }
+}
+
+function startWork({ project, message, model }) {
+  const name = projects().find((p) => p.toLowerCase() === String(project || '').toLowerCase());
+  if (!name) return { error: `There's no project called "${clip(project, 40)}" on this laptop.` };
+  const text = String(message || '').trim().slice(0, 8000);
+  if (!text) return { error: 'No brief.' };
+  if (started >= MAX_NEW) return { error: `${MAX_NEW} new sessions are already running here; wait for one to finish.` };
+  const args = ['-p', '--permission-mode', 'acceptEdits', ...(/^(haiku|sonnet|opus)$/.test(String(model)) ? ['--model', model] : []), text];
+  const child = spawn(CLAUDE, args, { cwd: path.join(PROJECTS, name), stdio: ['ignore', 'ignore', 'pipe'], env: process.env });
+  started++;
+  let err = '';
+  child.stderr.on('data', (d) => { err += d; });
+  child.on('close', (code) => { started--; log(`new work in ${name} ended (${code})${err ? ': ' + clip(err, 200) : ''}`); });
+  child.on('error', (e) => { started--; log('new work spawn failed', e.message); });
+  log(`new work in ${name}: ${clip(text, 80)}`);
+  return { started: true, project: name };
+}
+
 // ---------- thinking for the office ----------
 
 // When the office machine has no Claude login, the chief's routing call runs
@@ -267,6 +301,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/tabs') return send(200, await tabAction(await readBody(req)));
     if (req.method === 'POST' && req.url === '/app') return send(200, await openApp((await readBody(req)).name));
     if (req.method === 'POST' && req.url === '/session') return send(200, tellSession(await readBody(req)));
+    if (req.method === 'POST' && req.url === '/projects') return send(200, { projects: projects() });
+    if (req.method === 'POST' && req.url === '/start') return send(200, startWork(await readBody(req)));
     if (req.method === 'POST' && req.url === '/think') return send(200, await think(await readBody(req)));
     send(404, { error: 'No such action.' });
   } catch (err) {
