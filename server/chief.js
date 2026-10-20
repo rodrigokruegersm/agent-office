@@ -238,10 +238,14 @@ export class WarmChief {
         }
       }
     });
-    child.stderr.on('data', () => {});
+    let err = '';
+    child.stderr.on('data', (d) => { err = (err + d).slice(-400); });
     child.stdin.on('error', () => {});
-    child.on('close', () => {
-      if (this.child === child) this.child = null;
+    child.on('close', (code) => {
+      if (this.child === child) {
+        this.child = null;
+        if (code) console.warn(`[jarvis] warm chief stopped (${code}): ${err.trim().split('\n').pop() || buf.slice(-200)}`);
+      }
       if (this.waiting) { this.waiting.reject(new Error('The chief stopped mid-thought.')); this.waiting = null; }
     });
     child.on('error', () => {});
