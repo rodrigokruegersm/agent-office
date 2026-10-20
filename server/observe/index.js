@@ -131,6 +131,11 @@ export class Observer {
     const tool = clip(body.tool, 80);
     const station = STATIONS.has(body.station) ? body.station : tool ? stationFor(tool) : state === 'working' ? 'desk' : 'lounge';
     const activity = clip(body.activity, 200) || (tool ? summarizeTool(tool, body.input || {}) : '');
+    // When it happened, if the reporter knows (a replay after a restart);
+    // never in the future, never older than a day.
+    const at = Number.isFinite(+body.at) && +body.at > 0 ? Math.min(Date.now(), Math.max(Date.now() - 86_400_000, +body.at)) : Date.now();
+    // A replay of what's already known changes nothing.
+    if (this.agents.get(id)?.updated >= at && body.at) return { ok: true, id };
     this.upsert(id, {
       source,
       name: clip(body.name, 40) || rawId.slice(0, 40),
@@ -142,7 +147,7 @@ export class Observer {
       ...(body.cwd && { cwd: clip(body.cwd, 400) }),
       ...(body.sessionId && /^[\w-]{8,80}$/.test(body.sessionId) && { sessionId: body.sessionId }),
       ...(body.title && { title: clip(body.title, 100) }),
-    });
+    }, at);
     return { ok: true, id };
   }
 

@@ -182,13 +182,21 @@ const watcher = new TranscriptWatcher({
     sessions.set(ev.sessionId, s);
     if (ev.meta) return;
     const project = path.basename(s.cwd || '') || 'claude';
-    report({
+    s.last = {
       source: 'claude', id: ev.sessionId, sessionId: ev.sessionId, host: HOST, cwd: s.cwd,
       name: ev.name || project, project: `${project} · ${HOST}`, title: ev.title,
-      state: ev.state, station: ev.station, tool: ev.tool, activity: ev.activity,
-    });
+      state: ev.state, station: ev.station, tool: ev.tool, activity: ev.activity, at: ev.at,
+    };
+    report(s.last);
   },
 });
+
+// Every two minutes, what each recent session last did, with when it did it,
+// so an office that restarted (and forgot) catches up.
+setInterval(() => {
+  const since = Date.now() - 3 * 60 * 60_000;
+  for (const s of sessions.values()) if (s.last && s.last.at >= since) report(s.last);
+}, 120_000).unref();
 
 // A message to a session that is waiting for its next turn: run the session
 // on in the background, headless, in its own folder. One at a time each, and
