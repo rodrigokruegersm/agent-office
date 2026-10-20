@@ -1,0 +1,92 @@
+/* ---------- fork: the building (see tower.js) ---------- */
+
+.tower {
+  position: absolute; inset: 0; z-index: 20; overflow: auto; overscroll-behavior: contain;
+  padding: 88px 16px 140px 440px; box-sizing: border-box;
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--paper, #f3efe7) 70%, #bcd4ea) 0%, var(--paper, #f3efe7) 55%);
+}
+.tw-building { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+
+.tw-roof { text-align: center; padding: 6px 0 8px; }
+.tw-sign {
+  display: inline-block; padding: 6px 18px; border-radius: 10px; font-weight: 750; font-size: 18px; letter-spacing: 0.02em;
+  background: var(--ink); color: var(--paper, #fff); box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+}
+.tw-sub { margin-top: 6px; font-size: 12px; color: var(--ink-3); }
+
+.tw-floor {
+  display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: stretch;
+  padding: 12px; border-radius: 14px; background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  border-left: 6px solid var(--fc);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 0.08);
+}
+.tw-label { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px; min-width: 0; }
+.tw-num {
+  width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 800; font-size: 14px;
+  background: color-mix(in srgb, var(--fc) 18%, transparent); color: var(--fc);
+}
+.tw-name { font-weight: 750; font-size: 16px; color: var(--ink); }
+.tw-counts { font-size: 12px; color: var(--ink-3); }
+.tw-counts.alert { color: var(--bad); font-weight: 650; }
+
+.tw-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; min-width: 0; }
+.tw-room {
+  all: unset; cursor: pointer; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 9px 10px; border-radius: 10px;
+  background: color-mix(in srgb, var(--fc) 5%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ink) 7%, transparent);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.tw-room:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgb(0 0 0 / 0.1); }
+.tw-room:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tw-room.idle { opacity: 0.72; }
+.tw-room.waiting { border-color: color-mix(in srgb, var(--bad) 50%, transparent); background: color-mix(in srgb, var(--bad) 6%, var(--surface)); }
+.tw-room-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tw-room-name { font-weight: 680; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.tw-host { font-size: 10.5px; color: var(--ink-3); flex: none; }
+
+.tw-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: #a3a3a3; }
+.working > .tw-room-head .tw-dot, .tw-rack.working .tw-dot { background: #22a35a; box-shadow: 0 0 0 0 rgb(34 163 90 / 0.5); animation: tw-pulse 1.6s infinite; }
+.waiting > .tw-room-head .tw-dot, .tw-rack.error .tw-dot, .tw-rack.waiting .tw-dot { background: var(--bad); }
+.queued > .tw-room-head .tw-dot { background: #f59e0b; }
+@keyframes tw-pulse { 70% { box-shadow: 0 0 0 7px rgb(34 163 90 / 0); } }
+@media (prefers-reduced-motion: reduce) { .tw-dot { animation: none !important; } }
+
+.tw-worker { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: center; min-width: 0; }
+.tw-face { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 750; font-size: 12px; box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.15); }
+.tw-worker-text { display: flex; flex-direction: column; min-width: 0; }
+.tw-who { font-size: 11.5px; font-weight: 650; color: var(--ink-2); }
+.tw-doing { font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tw-worker.waiting .tw-doing { color: var(--bad); }
+.tw-more, .tw-quiet, .tw-empty { font-size: 11.5px; color: var(--ink-3); }
+.tw-done { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tw-done.failed { color: var(--bad); }
+
+.tw-lobby .tw-jarvis { cursor: default; }
+.tw-racks { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.tw-rack {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 7px;
+  font: 11.5px/1.2 'JetBrains Mono', ui-monospace, monospace; color: var(--ink-2);
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+.tw-rack:focus-visible { outline: 2px solid var(--accent); }
+
+/* Building / 3D office switch */
+.tower-toggle {
+  position: absolute; z-index: 21; top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; padding: 3px; gap: 2px; border-radius: 999px;
+  background: var(--pane, var(--surface)); border: 1px solid var(--pane-edge, transparent); box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
+}
+.tower-toggle button { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
+.tower-toggle button.on { background: var(--ink); color: var(--paper, #fff); }
+.tower-toggle button:focus-visible { outline: 2px solid var(--accent); }
+
+@media (max-width: 860px) {
+  .tower { padding: 64px 12px 120px; }
+  .tw-floor { grid-template-columns: 1fr; }
+  .tw-label { flex-direction: row; align-items: center; gap: 8px; }
+  .tower-toggle { top: 12px; }
+}

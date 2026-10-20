@@ -21,7 +21,11 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
 import { TranscriptWatcher } from '../server/observe/claude.js';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const DIR = process.env.JARVIS_HANDS_DIR || path.join(os.homedir(), '.jarvis-hands');
 const cfg = JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
@@ -297,7 +301,7 @@ const server = http.createServer(async (req, res) => {
   if (req.headers.origin || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(String(req.headers.host || ''))) return send(403, { error: 'Local only.' });
   if (!same(req.headers['x-hands-key'], cfg.key)) return send(401, { error: 'Wrong key.' });
   try {
-    if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, host: HOST, browser: BROWSER });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, host: HOST, browser: BROWSER, repo: REPO, node: process.execPath, projectsRoot: PROJECTS });
     if (req.method === 'POST' && req.url === '/tabs') return send(200, await tabAction(await readBody(req)));
     if (req.method === 'POST' && req.url === '/app') return send(200, await openApp((await readBody(req)).name));
     if (req.method === 'POST' && req.url === '/session') return send(200, tellSession(await readBody(req)));
@@ -309,6 +313,51 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     send(400, { error: clip(err.message, 300) });
   }
+});
+
+// ---------- office jobs, run here ----------
+
+// The office (on the other machine) runs some of its jobs on this laptop,
+// where the projects, connectors and Opus login are. It connects to /run,
+// sends { cwd, args, env } once, and from then on this is a pipe: claude's
+// stdout and stderr go back as { o } and { e }, the office's { i } goes to
+// claude's stdin, and the exit code comes back as { x }. Closing the socket
+// stops claude. Only folders inside the projects root can be a job's cwd.
+const SAFE_ENV = new Set(['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'OFFICE_JOB_UNLOCKED']);
+const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+server.on('upgrade', (req, socket, head) => {
+  if (req.url !== '/run' || req.headers.origin || !same(req.headers['x-hands-key'], cfg.key)) return socket.destroy();
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    let child = null;
+    const out = (o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
+    ws.on('message', (raw) => {
+      let m;
+      try { m = JSON.parse(raw); } catch { return; }
+      if (!child) {
+        const cwd = path.resolve(String(m.cwd || ''));
+        if (!cwd.startsWith(PROJECTS + path.sep) || !fs.existsSync(cwd) || !Array.isArray(m.args) || !m.args.every((a) => typeof a === 'string')) {
+          out({ e: 'Not a project on this laptop.\n' }); out({ x: 1 }); return ws.close();
+        }
+        const env = { ...process.env };
+        for (const [k, v] of Object.entries(m.env || {})) if (SAFE_ENV.has(k)) env[k] = String(v);
+        child = spawn(CLAUDE, m.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
+        child.stdout.on('data', (d) => out({ o: d }));
+        child.stderr.on('data', (d) => out({ e: d }));
+        child.stdin.on('error', () => {});
+        child.on('error', (err) => { out({ e: `Could not start claude: ${err.message}\n` }); out({ x: 1 }); ws.close(); });
+        child.on('close', (code) => { out({ x: code ?? 1 }); ws.close(); });
+        out({ pid: child.pid });
+        log(`office job in ${path.basename(cwd)}`);
+        return;
+      }
+      if (typeof m.i === 'string') child.stdin.write(m.i);
+      if (m.end) child.stdin.end();
+      if (m.kill) child.kill(m.kill === 'SIGKILL' ? 'SIGKILL' : 'SIGTERM');
+    });
+    ws.on('close', () => { if (child && child.exitCode === null) child.kill('SIGTERM'); });
+  });
 });
 
 server.listen(PORT, '127.0.0.1', () => {

@@ -33,6 +33,8 @@ import { findCloudflared } from './cloudflared.js';
 import { Observer } from './observe/index.js'; // fork: agents the office didn't start
 import { Hands } from './hands.js'; // fork: Jarvis's hands on the boss's laptop
 import { fastPath } from './fastpath.js';
+import { remoteSpawn } from './remote.js';
+import { loadDepartments } from './departments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, '..');
@@ -310,7 +312,8 @@ for (const j of state.jobs) {
 
 const levelOf = (xp) => Math.floor(Math.sqrt(xp / 100)) + 1;
 const xpFor = (level) => 100 * (level - 1) ** 2;
-const capacity = () => Math.min(STAFF.length, 2 + levelOf(state.xp));
+// fork: with departments to staff, Jarvis's office has everyone in from day one.
+const capacity = () => (process.env.OFFICE_CHIEF_NAME ? STAFF.length : Math.min(STAFF.length, 2 + levelOf(state.xp)));
 const hired = () => STAFF.slice(0, capacity());
 // Who's in today: everyone hired, minus anyone the boss sent home.
 const onFloor = () => hired().filter((s) => !state.dismissed.includes(s.id));
@@ -403,7 +406,7 @@ guests = new Guests(DATA, {
   },
 });
 // Broadcasts that can't change what an agent is doing don't need presence checked.
-const NOT_PRESENCE = new Set(['links', 'visitors', 'remote', 'proc', 'leaderboard', 'auth', 'usage', 'economy', 'external']);
+const NOT_PRESENCE = new Set(['links', 'visitors', 'remote', 'proc', 'leaderboard', 'auth', 'usage', 'economy', 'external', 'building']);
 
 function send(msg) {
   const data = JSON.stringify(msg);
@@ -468,6 +471,7 @@ const snapshot = () => ({
   contextLimit: contextLimit(),
   external: observer.list(),
   chiefName: CHIEF_NAME,
+  building: CHIEF_NAME ? building() : null,
 });
 
 // ---------- what the agents are costing this machine ----------
@@ -824,7 +828,7 @@ function listRepos() {
 // `extra` tags a job, as a guest's (`from`, `guest`); it must be set before the job can start.
 function createJob({ repo, prompt, mode = 'edit', model = '', auto = false, agentId = '' }, extra = {}) {
   // A project at a host (`away`) isn't on this machine; its name is `web@host`.
-  if (!extra.away && !repoPath(repo)) throw new Error('Unknown project folder.');
+  if (!extra.away && !(extra.host === 'laptop' ? laptopHas(repo) : repoPath(repo))) throw new Error('Unknown project folder.');
   prompt = String(prompt || '').trim();
   if (!prompt) throw new Error('Give the job a brief.');
   if (!MODES[mode]) throw new Error('Unknown mode.');
@@ -858,7 +862,7 @@ function pump() {
     const free = roster.filter((s) => !busy.has(s.id) && (!job.wantAgent || s.id === job.wantAgent) && (!job.pool || job.pool.includes(s.id)));
     // Waiting on a busy colleague is ordinary, so it goes in the job's log only.
     if (!free.length) { hold(job, job.wantAgent ? `${nameOf(job.wantAgent)} is busy on another job` : job.pool ? 'the agents lent to this guest are busy' : 'everyone in is busy', { quiet: true }); continue; }
-    const why = machineSays(job);
+    const why = job.host === 'laptop' ? (laptop.up ? null : 'the laptop is asleep or away; it starts when the laptop is back') : machineSays(job);
     if (why) { hold(job, why); continue; }
     // Follow-ups go back to whoever did the first round, if they're free.
     const agent = free.find((s) => s.id === job.agentId) || free[Math.floor(Math.random() * free.length)];
@@ -922,7 +926,7 @@ function denyData(args) {
 }
 
 function start(job, agentId) {
-  const cwd = job.away ? awayDir(job) : repoPath(job.repo);
+  const cwd = job.away ? awayDir(job) : job.host === 'laptop' ? laptopPath(job.repo) : repoPath(job.repo);
   // An away job reads files it doesn't own, so nothing that runs code here:
   // no built-in tools, no settings, hooks or connectors, only the office's.
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
@@ -938,6 +942,8 @@ function start(job, agentId) {
   // A guest's job gets none of them: they are the boss's files.
   if (job.away) {
     try { fs.mkdirSync(cwd, { recursive: true, mode: 0o700 }); } catch {}
+  } else if (job.host === 'laptop') {
+    // fork: on the laptop the office's folders don't exist; its tools are there.
   } else if (!job.guest) {
     fs.mkdirSync(UPLOADS, { recursive: true, mode: 0o700 });
     args.push('--add-dir', UPLOADS);
@@ -948,10 +954,13 @@ function start(job, agentId) {
     // hooks, or memory: at Full autonomy those would all be the guest's.
     args.push('--strict-mcp-config', '--setting-sources', 'project,local', '--settings', JSON.stringify({ autoMemoryEnabled: false }));
   }
-  if (cwd && !job.away && within(DATA, cwd)) denyData(args);
+  if (cwd && !job.away && !job.host && within(DATA, cwd)) denyData(args);
+  // fork: Jarvis's agents act on their own, but money and messages wait for the boss.
+  const guard = jarvisGuard(job);
+  if (guard) args.push('--settings', JSON.stringify(guard));
   // A guest's job can be away too: one of our agents, lent to the guest, in the guest's own project.
   const allowed = [...officeTools(job), ...(job.away ? awayTools(job) : [])];
-  args.push('--mcp-config', mcpFile, '--allowedTools', allowed.join(','), '--append-system-prompt', (job.guest ? guestPrompt(agentId, job) : officePrompt(agentId, job)) + awayPrompt(job));
+  args.push('--mcp-config', job.host === 'laptop' ? JSON.stringify(laptopMcp(mcp)) : mcpFile, '--allowedTools', allowed.join(','), '--append-system-prompt', (job.guest ? guestPrompt(agentId, job) : officePrompt(agentId, job)) + awayPrompt(job));
   // Being given work in a channel is how you end up in it.
   try { joinChannel(channelOf(job.channel), agentId); } catch {}
   const first = job.sessionId ? withClearHint(job, job.pending) : job.pending;
@@ -967,7 +976,7 @@ function start(job, agentId) {
   // Where the tree stood before this job touched it, for the "what changed"
   // card. Taken once: a job resumed with a reply keeps its first baseline.
   // An away job's changes are the host's to review, in its own office.
-  if (!job.baseTree && !job.away) bases.set(job.id, snapshotTree(cwd).then((t) => { job.baseTree = t; }));
+  if (!job.baseTree && !job.away && !job.host) bases.set(job.id, snapshotTree(cwd).then((t) => { job.baseTree = t; }));
 
   // stdin stays open for the whole job, so the chief can hand the agent
   // new messages while it works.
@@ -978,7 +987,10 @@ function start(job, agentId) {
   } catch (err) {
     return finish(job, 'failed', `Could not write the office tools' config: ${err.message}`);
   }
-  const child = spawn(CLAUDE, args, { cwd, env: { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(settings.get('compactPct')), ...(job.guest ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}), ...auth.env() }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const jobEnv = { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(settings.get('compactPct')), ...(job.guest ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}), OFFICE_URL: `http://127.0.0.1:${PORT}`, OFFICE_JOB: job.id, OFFICE_TOKEN: token };
+  const child = job.host === 'laptop'
+    ? remoteSpawn(hands, { cwd, args, env: jobEnv })
+    : spawn(CLAUDE, args, { cwd, env: { ...jobEnv, ...auth.env() }, stdio: ['pipe', 'pipe', 'pipe'] });
   running.set(job.id, child);
   startProcs();
   child.stdin.on('error', () => {});
@@ -1112,6 +1124,12 @@ function answered(job) {
 
 // Hand a message to a job, whatever state it is in.
 function deliver(job, text) {
+  // fork: the boss saying yes to what an agent asked to spend or send.
+  if (job.approval && /\b(approved?|go ahead|do it|yes|allowed?|ok(?:ay)?)\b/i.test(text)) {
+    job.unlocked = true;
+    addLog(job, { kind: 'system', summary: `Approved by the boss: ${job.approval.tool}` });
+    job.approval = null;
+  }
   if (job.status === 'working') {
     const child = running.get(job.id);
     endGrace(job);
@@ -1672,7 +1690,7 @@ function chiefContext(text, agents, repo, channel = GENERAL) {
     lines.push('Recently finished:');
     for (const j of recent) lines.push(`- job ${j.id} by ${nameOf(j.agentId)} in ${j.repo}, asked for in #${channelOf(j.channel)}: "${j.title}" (${j.status}, ${ago(j.endedAt)} ago)`);
   }
-  lines.push('', `Projects: ${listRepos().join(', ')}`);
+  lines.push('', `Projects: ${[...new Set([...listRepos(), ...(CHIEF_NAME ? laptop.projects.filter((p) => !depts.isHidden(p)) : [])])].join(', ')}`);
   lines.push('', `This message is in channel #${channel}. Channels: ${state.channels.map((c) => '#' + c.id).join(', ')}.`);
   lines.push(`You can only see #${channel}'s history below. A job's own channel is on its line above; never guess where something was discussed.`, '', `Recent chat in #${channel}:`);
   for (const m of state.chat.filter((x) => channelOf(x.channel) === channel).slice(-9, -1)) {
@@ -1688,6 +1706,63 @@ function chiefContext(text, agents, repo, channel = GENERAL) {
 }
 
 // ---------- fork: Jarvis ----------
+
+// The laptop as a place jobs run: its projects folder, node and checkout of
+// this repo (for the office tools), refreshed every half minute.
+const laptop = { up: false, root: '', node: '', repo: '', projects: [] };
+async function refreshLaptop() {
+  if (!hands.configured) return;
+  try {
+    const h = await hands.call('/health', undefined, 4000);
+    const projects = await hands.projects();
+    const was = laptop.up;
+    Object.assign(laptop, { up: true, root: h.projectsRoot, node: h.node, repo: h.repo, projects });
+    if (!was) pump();
+  } catch { laptop.up = false; }
+  announceBuilding();
+}
+setInterval(refreshLaptop, 30_000).unref();
+setTimeout(refreshLaptop, 1000);
+const laptopHas = (name) => laptop.projects.includes(name);
+
+// The building: each floor's projects, wherever they live. A project on both
+// machines is the office's (it runs here).
+const depts = loadDepartments(DATA);
+function building() {
+  const here = new Set(listRepos());
+  const all = [...here, ...laptop.projects.filter((p) => !here.has(p))];
+  const floors = depts.floors.map((f) => ({ ...f, projects: [] }));
+  const byId = Object.fromEntries(floors.map((f) => [f.id, f]));
+  for (const name of all.sort((a, b) => a.localeCompare(b))) {
+    const fid = depts.floorOf(name);
+    if (fid) byId[fid].projects.push({ name, host: here.has(name) ? 'office' : 'laptop' });
+  }
+  return { floors, laptopUp: laptop.up };
+}
+let lastBuilding = '';
+function announceBuilding() {
+  const b = building();
+  const k = JSON.stringify(b);
+  if (k !== lastBuilding) { lastBuilding = k; send({ t: 'building', building: b }); }
+}
+setInterval(announceBuilding, 30_000).unref();
+const laptopPath = (name) => (laptop.root && laptopHas(name) ? `${laptop.root}/${name}` : null);
+// The office tools for a job on the laptop: the same server, run from the
+// laptop's checkout, reaching this office back through the tunnel.
+function laptopMcp(mcp) {
+  const office = mcp.mcpServers.office;
+  return { mcpServers: { office: { command: laptop.node, args: [`${laptop.repo}/server/office-mcp.js`], env: { ...office.env, OFFICE_URL: `http://127.0.0.1:${PORT}` } } } };
+}
+// Jarvis's agents run with full autonomy (MODES.auto), on Opus; the guard
+// holds money and messages for the boss.
+const AGENT_MODEL = String(process.env.OFFICE_AGENT_MODEL || '').trim();
+function jarvisGuard(job) {
+  if (!CHIEF_NAME || job.away || job.guest) return null;
+  const script = job.host === 'laptop' ? `${laptop.repo}/bin/approval-guard.js` : path.join(HERE, '..', 'bin', 'approval-guard.js');
+  const node = job.host === 'laptop' ? laptop.node : process.execPath;
+  return { hooks: { PreToolUse: [{ matcher: 'mcp__.*', hooks: [{ type: 'command', command: `'${node}' '${script}'`, timeout: 10 }] }] } };
+}
+
 
 // What Jarvis sees besides the office: the sessions outside it and the
 // laptop's open tabs. Put before the boss's message, which ends the context.
@@ -1705,7 +1780,10 @@ async function withJarvisContext(context, said = '') {
   // The tab list is long, and most questions aren't about tabs: only then.
   const aboutTabs = /\b(tabs?|open|close|switch|window|page|site|browser|chrome|reload|refresh|show me|go to|search)\b/i.test(said);
   const [tabs, laptopProjects] = await Promise.all([aboutTabs ? hands.tabs() : Promise.resolve(null), hands.projects()]);
-  if (laptopProjects.length) extra.push(`Laptop projects: ${laptopProjects.join(', ')}`);
+  const b = building();
+  extra.push('Floors (every project, by area; "new" works for any of them, wherever it lives):');
+  for (const f of b.floors) extra.push(`- ${f.name}: ${f.projects.map((p) => p.name + (p.host === 'laptop' ? ' (laptop)' : '')).join(', ') || 'no projects yet'}`);
+  if (!laptop.up && hands.configured) extra.push('The laptop is away: work for laptop projects waits in the queue until it is back.');
   if (laptopBrain) extra.push("The office machine isn't signed in to Claude yet, so office jobs can't run: give new work as \"laptop\" in a laptop project, and if the project is only in the office, say the office needs signing in first (the boss double-clicks Finish Jarvis setup).");
   if (tabs) {
     extra.push(`Laptop tabs (${tabs.length}):`);
@@ -1788,8 +1866,12 @@ async function jarvisActs(d) {
   }
 }
 
-function hireWork({ repo, brief, agentId, mode, model, auto, say, files, thread, inThread, channel }) {
-  const job = createJob({ repo, prompt: withFiles(brief, files), mode, model, auto, agentId: agentId || '' });
+function hireWork({ repo, brief, agentId, mode, model, auto, say, files, thread, inThread, channel, host }) {
+  // fork: Jarvis's agents get the most capable model and full autonomy
+  // (money and messages still wait for the boss: jarvisGuard).
+  if (CHIEF_NAME && AGENT_MODEL) { model = AGENT_MODEL; auto = false; }
+  if (CHIEF_NAME && mode === 'edit') mode = 'auto';
+  const job = createJob({ repo, prompt: withFiles(brief, files), mode, model, auto, agentId: agentId || '' }, host ? { host } : {});
   job.thread = thread;
   job.channel = channel;
   const who = nameOf(job.agentId);
@@ -1898,14 +1980,19 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     // Never more jobs than there are people to do them: the list comes from
     // the model, and chat it reads can ask for a hundred.
     const asked = Array.isArray(d.jobs) && d.jobs.length ? d.jobs : [d];
-    const work = asked.slice(0, roster.length).map((w) => ({ ...w, project: repo || listRepos().find((r) => norm(r) === norm(w.repo || '')) }));
+    const work = asked.slice(0, roster.length).map((w) => {
+      const project = repo || listRepos().find((r) => norm(r) === norm(w.repo || ''));
+      // fork: a project only on the laptop runs there, as an office job.
+      const away = !project && laptop.projects.find((r) => norm(r) === norm(w.repo || ''));
+      return { ...w, project: project || away, host: away ? 'laptop' : undefined };
+    });
     if (asked.length > work.length) console.warn(`[chief] asked for ${asked.length} jobs; handing out ${work.length}, the roster size`);
     if (work.some((w) => !w.project)) return say('Which project is that for? Tag it with #project.');
     // One job for the one agent tagged: the tag decides who, as it always
     // has. Otherwise each job goes to the chief's pick.
     for (const w of work) w.agentId = (work.length === 1 && agents.length === 1 && agent.id) || (onRoster(w.agentId) ? w.agentId : work.length === 1 ? agent?.id || '' : '');
     for (const w of work) {
-      hireWork({ repo: w.project, brief: (w.brief || '').trim() || clean, agentId: w.agentId, mode, ...sized(model, w.model), say: w.say || (work.length === 1 ? d.say : ''), files, thread: root, inThread, channel });
+      hireWork({ repo: w.project, brief: (w.brief || '').trim() || clean, agentId: w.agentId, mode, ...sized(model, w.model), say: w.say || (work.length === 1 ? d.say : ''), files, thread: root, inThread, channel, host: w.host });
     }
     return;
   }
@@ -3069,6 +3156,21 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         return json(res, err.code >= 400 && err.code < 600 ? err.code : 502, { error: err.message });
       }
+    }
+    // fork: the approval guard (bin/approval-guard.js) asking for a held tool.
+    if (req.method === 'POST' && parts[1] === 'agent' && parts[2] === 'approval') {
+      const me = caller(req);
+      if (!me) return json(res, 403, { error: 'Not on the clock.' });
+      const { tool = '', input = '' } = await readBody(req);
+      if (me.unlocked) return json(res, 200, { allowed: true });
+      const name = String(tool).replace(/^mcp__/, '').replace(/__/g, ' · ');
+      if (me.approval?.tool !== name) {
+        me.approval = { tool: name, at: Date.now() };
+        addLog(me, { kind: 'error', summary: `Wants to use ${name}: needs the boss's approval`, blocked: true });
+        post('chief', `${nameOf(me.agentId)} wants to use ${name} on ${me.repo}${input && input !== '{}' ? ` (${clip(input, 160)})` : ''}. Say "approve" to let them, sir.`, { jobId: me.id, kind: 'flag', channel: channelOf(me.channel) });
+        pushJob(me);
+      }
+      return json(res, 200, { allowed: false });
     }
     if (req.method === 'POST' && parts[1] === 'agent' && agentApi[parts[2]]) {
       const me = caller(req);

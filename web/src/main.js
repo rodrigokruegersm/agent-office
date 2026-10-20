@@ -25,6 +25,7 @@ import { PoolRoom } from './pool.js';
 import { Visitors } from './visitors.js';
 import { External } from './external.js'; // fork
 import { Jarvis } from './jarvis.js'; // fork
+import { Tower } from './tower.js'; // fork
 import { Confetti } from './fx.js';
 import { AgentChat } from './talk.js';
 import { Hud, api } from './hud.js';
@@ -272,6 +273,7 @@ const visitors = new Visitors({ world, labels, camera, canvas: renderer.domEleme
 // fork: contractors and Jarvis, set up below once notify() exists.
 let external = null;
 let jarvis = null;
+let tower = null;
 chief.want = 'desk';
 chief.teleport('desk');
 
@@ -491,10 +493,13 @@ function applyLook(economy) {
 function handle(msg) {
   if (visitors.handle(msg)) return;
   if (external?.handle(msg)) return;
+  tower?.handle(msg);
+  if (msg.t === 'building') return;
   if (msg.economy) applyLook(msg.economy);
   if (msg.t === 'hello') {
     // fork: a named chief (Jarvis) can be talked to hands-free.
     app.chiefName = msg.visiting ? '' : msg.chiefName || '';
+    app.ownerName = msg.owner || '';
     if (app.chiefName) chief.rename(app.chiefName);
     jarvis?.setName(app.chiefName);
     setVisiting(msg.visiting);
@@ -668,6 +673,7 @@ document.addEventListener('visibilitychange', () => {
 });
 external = new External({ world, labels, camera, canvas: renderer.domElement, api, notify, sound });
 jarvis = new Jarvis({ api, speech, notify, piper: () => tts.ok && tts.replies });
+tower = new Tower({ app, external, view: renderer.domElement.closest('.view') || document.body });
 // Ask once, on the first message you send.
 document.getElementById('composer').addEventListener('submit', () => {
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
