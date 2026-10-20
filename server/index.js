@@ -1691,9 +1691,9 @@ function chiefContext(text, agents, repo, channel = GENERAL) {
 
 // What Jarvis sees besides the office: the sessions outside it and the
 // laptop's open tabs. Put before the boss's message, which ends the context.
-async function withJarvisContext(context) {
+async function withJarvisContext(context, said = '') {
   const extra = [];
-  const outside = observer.list().filter((a) => a.state !== 'idle' || Date.now() - a.updated < 3 * 60 * 60_000).sort((a, b) => b.updated - a.updated).slice(0, 20);
+  const outside = observer.list().filter((a) => a.state !== 'idle' || Date.now() - a.updated < 3 * 60 * 60_000).sort((a, b) => b.updated - a.updated).slice(0, 14);
   if (outside.length) {
     extra.push('Contractors (outside the office):');
     for (const a of outside) {
@@ -1702,7 +1702,9 @@ async function withJarvisContext(context) {
       extra.push(`- ${a.name} (sessionId ${a.id}, ${kind}${a.project ? `, ${a.project}` : ''}): ${a.state === 'waiting' ? 'WAITING ON THE BOSS' : a.state === 'error' ? 'FAILED' : a.state}. ${clip(a.activity, 120)}${a.title ? ` (asked: "${clip(a.title, 80)}")` : ''}`);
     }
   }
-  const [tabs, laptopProjects] = await Promise.all([hands.tabs(), hands.projects()]);
+  // The tab list is long, and most questions aren't about tabs: only then.
+  const aboutTabs = /\b(tabs?|open|close|switch|window|page|site|browser|chrome|reload|refresh|show me|go to|search)\b/i.test(said);
+  const [tabs, laptopProjects] = await Promise.all([aboutTabs ? hands.tabs() : Promise.resolve(null), hands.projects()]);
   if (laptopProjects.length) extra.push(`Laptop projects: ${laptopProjects.join(', ')}`);
   if (laptopBrain) extra.push("The office machine isn't signed in to Claude yet, so office jobs can't run: give new work as \"laptop\" in a laptop project, and if the project is only in the office, say the office needs signing in first (the boss double-clicks Finish Jarvis setup).");
   if (tabs) {
@@ -1712,7 +1714,7 @@ async function withJarvisContext(context) {
       try { host = new URL(t.url).hostname; } catch {}
       extra.push(`- ${t.active ? '[active] ' : ''}${clip(t.title, 70)} (${host})`);
     }
-  } else if (hands.configured) extra.push("Laptop: not reachable right now (asleep or off the network).");
+  } else if (aboutTabs && hands.configured) extra.push("Laptop: not reachable right now (asleep or off the network).");
   if (!extra.length) return context;
   const at = context.lastIndexOf('\nNew message from the boss:');
   return at < 0 ? `${extra.join('\n')}\n\n${context}` : `${context.slice(0, at)}\n${extra.join('\n')}\n${context.slice(at)}`;
@@ -1732,7 +1734,7 @@ function probeLogin() {
   child.on('close', (code) => {
     clearTimeout(timer);
     if (code === 0 && !/not logged in|\/login/i.test(out)) {
-      warmChief = new WarmChief({ bin: CLAUDE, env: () => auth.env(), name: CHIEF_NAME });
+      warmChief = new WarmChief({ bin: CLAUDE, env: () => auth.env(), name: CHIEF_NAME, maxTurns: 5 });
       warmChief.warm(settings.get('chiefModel'));
       console.log(`[jarvis] signed in; thinking here on ${settings.get('chiefModel')}, kept warm`);
       return;
@@ -1838,7 +1840,7 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
       ? `${text}\n(Attached: ${files.map((f) => f.name).join(', ')}${shown.length ? `. ${shown.length === 1 ? 'The image is' : 'The images are'} attached for you to look at.` : ''})`
       : text;
     let context = chiefContext(said, agents, repo, channel);
-    if (CHIEF_NAME) context = await withJarvisContext(context);
+    if (CHIEF_NAME) context = await withJarvisContext(context, text);
     const opts = { bin: CLAUDE, model: settings.get('chiefModel'), images: shown, env: auth.env(), name: CHIEF_NAME };
     try {
       if (warmChief && !laptopBrain && !shown.length) {
