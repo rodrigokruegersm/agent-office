@@ -109,6 +109,7 @@ cat > "$AGENTS/$HANDS.plist" <<PLIST
 PLIST
 for l in "$TUNNEL" "$HANDS"; do
   launchctl bootout "gui/$UID/$l" 2>/dev/null || true
+  for _ in $(seq 1 30); do launchctl print "gui/$UID/$l" >/dev/null 2>&1 || break; sleep 1; done
   launchctl bootstrap "gui/$UID" "$AGENTS/$l.plist"
 done
 for _ in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 1; done

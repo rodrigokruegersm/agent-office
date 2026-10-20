@@ -90,6 +90,8 @@ cat > "$PLIST" <<PLIST
 </plist>
 PLIST
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+# bootout returns before the old one is gone; bootstrapping too soon fails (error 5).
+for _ in $(seq 1 30); do launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 || break; sleep 1; done
 rm -f "$DATA/office-port"
 launchctl bootstrap "gui/$UID" "$PLIST"
 for _ in $(seq 1 30); do [[ -s "$DATA/office-port" ]] && break; sleep 1; done
