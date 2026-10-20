@@ -21,14 +21,16 @@ export function remoteSpawn(hands, { cwd, args, env }) {
   const finish = (code) => {
     if (closed) return;
     closed = true;
+    child.stdin.writable = false;
     child.exitCode = code;
     child.stdout.end();
     child.stderr.end();
     child.emit('close', code);
   };
   child.stdin = new EventEmitter();
-  child.stdin.write = (data) => { send({ i: String(data) }); return true; };
-  child.stdin.end = (data) => { if (data) child.stdin.write(data); send({ end: 1 }); };
+  child.stdin.writable = true;
+  child.stdin.write = (data) => { if (!child.stdin.writable) return false; send({ i: String(data) }); return true; };
+  child.stdin.end = (data) => { if (data) child.stdin.write(data); child.stdin.writable = false; send({ end: 1 }); };
   child.kill = (sig = 'SIGTERM') => { send({ kill: sig }); setTimeout(() => ws.close(), 5000).unref(); return true; };
 
   ws.on('open', () => {
