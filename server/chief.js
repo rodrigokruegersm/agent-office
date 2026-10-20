@@ -195,3 +195,77 @@ function result(out) {
   }
   throw new Error('The stream carried no result.');
 }
+
+// fork: Jarvis kept warm. One `claude` process stays up between messages, so
+// a spoken request skips the CLI's startup: each message is a new turn on it,
+// carrying the office as it is now. It starts over every few turns (the
+// history only costs tokens), when the model changes, or if it dies.
+export class WarmChief {
+  constructor({ bin = 'claude', env = () => process.env, name = '', maxTurns = 12 } = {}) {
+    Object.assign(this, { bin, env, name, maxTurns });
+    this.child = null;
+    this.chain = Promise.resolve();
+  }
+
+  start(model) {
+    this.stop();
+    const args = ['-p', '--model', model, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+      '--json-schema', JSON.stringify(SCHEMA),
+      '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence',
+      '--system-prompt', systemFor(this.name) + `\n\nEach message carries the office as it is right now; earlier messages are only history. Decide on the newest one.`];
+    const child = spawn(this.bin, args, { env: this.env(), stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = child;
+    this.model = model;
+    this.turns = 0;
+    let buf = '';
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        let e;
+        try { e = JSON.parse(line); } catch { continue; }
+        if (e.type === 'result' && this.waiting) {
+          const w = this.waiting;
+          this.waiting = null;
+          try {
+            const decision = e.structured_output || JSON.parse(e.result);
+            w.resolve({ ...decision, cost: e.total_cost_usd || 0 });
+          } catch {
+            w.reject(new Error(e.is_error ? `claude said: ${String(e.result || e.subtype).split('\n')[0].slice(0, 300)}` : 'The chief could not decide.'));
+          }
+        }
+      }
+    });
+    child.stderr.on('data', () => {});
+    child.stdin.on('error', () => {});
+    child.on('close', () => {
+      if (this.child === child) this.child = null;
+      if (this.waiting) { this.waiting.reject(new Error('The chief stopped mid-thought.')); this.waiting = null; }
+    });
+    child.on('error', () => {});
+  }
+
+  stop() {
+    if (this.child) { const c = this.child; this.child = null; c.kill('SIGTERM'); }
+  }
+
+  // Ready for the first spoken word, not starting on it.
+  warm(model) { if (!this.child) this.start(model); }
+
+  ask(context, { model = 'haiku', timeoutMs = 45_000 } = {}) {
+    const run = () => new Promise((resolve, reject) => {
+      if (!this.child || this.model !== model || this.turns >= this.maxTurns) this.start(model);
+      const timer = setTimeout(() => { this.stop(); reject(new Error(`The chief took longer than ${Math.round(timeoutMs / 1000)} seconds to answer.`)); }, timeoutMs);
+      this.waiting = {
+        resolve: (v) => { clearTimeout(timer); this.turns++; resolve(v); if (this.turns >= this.maxTurns) setImmediate(() => this.start(model)); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      };
+      this.child.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: context } }) + '\n');
+    });
+    const p = this.chain.then(run, run);
+    this.chain = p.catch(() => {});
+    return p;
+  }
+}

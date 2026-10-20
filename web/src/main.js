@@ -591,7 +591,10 @@ function handle(msg) {
     const el = hud.addVoice(msg.id, msg.file);
     // Play it as it lands, the way you'd hear someone speak — but never over
     // your own recording, and not for a tab you aren't looking at.
-    if (el && tts.replies && !recorder.active && !document.hidden) el.play().catch(() => {});
+    // fork: with Jarvis listening, he speaks even from a background tab, and
+    // stops listening while he does.
+    if (el && tts.replies && !recorder.active && jarvis?.on) jarvis.play(el);
+    else if (el && tts.replies && !recorder.active && !document.hidden) el.play().catch(() => {});
   } else if (msg.t === 'tts') {
     tts = { ...tts, ...msg };
     paintSpeak();
@@ -664,7 +667,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { unseen = 0; document.title = 'Agent Office'; }
 });
 external = new External({ world, labels, camera, canvas: renderer.domElement, api, notify, sound });
-jarvis = new Jarvis({ api, speech, notify });
+jarvis = new Jarvis({ api, speech, notify, piper: () => tts.ok && tts.replies });
 // Ask once, on the first message you send.
 document.getElementById('composer').addEventListener('submit', () => {
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}

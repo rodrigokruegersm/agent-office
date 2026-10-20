@@ -7,7 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { summarizeTool, stationFor } from './tools.js';
-import { canSee, route } from './chief.js';
+import { canSee, route, WarmChief } from './chief.js';
 import { fetchUsage } from './usage.js';
 import { writeStandup, dueToday } from './standup.js';
 import { writeBanter } from './banter.js';
@@ -32,6 +32,7 @@ import { Tunnel } from './tunnel.js';
 import { findCloudflared } from './cloudflared.js';
 import { Observer } from './observe/index.js'; // fork: agents the office didn't start
 import { Hands } from './hands.js'; // fork: Jarvis's hands on the boss's laptop
+import { fastPath } from './fastpath.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, '..');
@@ -417,6 +418,8 @@ const CHIEF_NAME = String(process.env.OFFICE_CHIEF_NAME || '').trim().slice(0, 3
 const hands = new Hands(DATA);
 // Set once the chief has found no Claude login here; a saved token clears it on restart.
 let laptopBrain = false;
+// Jarvis's routing process, kept running between messages (see WarmChief).
+let warmChief = null;
 const observer = new Observer({
   data: DATA,
   send: (msg) => { const data = JSON.stringify(msg); for (const ws of clients) if (ws.readyState === 1) ws.send(data); },
@@ -1715,8 +1718,9 @@ async function withJarvisContext(context) {
   return at < 0 ? `${extra.join('\n')}\n\n${context}` : `${context.slice(0, at)}\n${extra.join('\n')}\n${context.slice(at)}`;
 }
 
-// Whether claude here is signed in, asked once at startup, so a Jarvis with
-// no login thinks on the laptop from his first word instead of after a timeout.
+// Whether claude here is signed in, asked once at startup: signed in, Jarvis's
+// warm process starts now; not, he thinks on the laptop from his first word
+// instead of after a timeout.
 function probeLogin() {
   if (!CHIEF_NAME || !hands.configured) return;
   const child = spawn(CLAUDE, ['-p', '--model', 'haiku', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', 'Reply with OK.'], { env: auth.env(), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1727,10 +1731,13 @@ function probeLogin() {
   child.on('error', () => clearTimeout(timer));
   child.on('close', (code) => {
     clearTimeout(timer);
-    if (code !== 0 || /not logged in|\/login/i.test(out)) {
-      laptopBrain = true;
-      console.warn(`[jarvis] claude isn't signed in here (${clip(out, 80) || `exit ${code}`}); thinking on the laptop until it is`);
+    if (code === 0 && !/not logged in|\/login/i.test(out)) {
+      warmChief = new WarmChief({ bin: CLAUDE, env: () => auth.env(), name: CHIEF_NAME });
+      warmChief.warm(settings.get('chiefModel'));
+      return;
     }
+    laptopBrain = true;
+    console.warn(`[jarvis] claude isn't signed in here (${clip(out, 80) || `exit ${code}`}); thinking on the laptop until it is`);
   });
 }
 
@@ -1809,6 +1816,16 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     return hireWork({ repo, brief: clean, agentId: agent?.id, mode, ...sized(model), files, thread: root, inThread, channel });
   }
 
+  // fork: plain browser and app commands skip the chief altogether.
+  if (CHIEF_NAME && hands.configured && !files.length && !agents.length && !repo) {
+    try {
+      const line = await fastPath(clean || text, hands, () => hands.apps());
+      if (line) return say(line);
+    } catch (err) {
+      return say(err.message);
+    }
+  }
+
   chiefBusy = true;
   send({ t: 'chief', busy: true });
   let d;
@@ -1823,7 +1840,14 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     if (CHIEF_NAME) context = await withJarvisContext(context);
     const opts = { bin: CLAUDE, model: settings.get('chiefModel'), images: shown, env: auth.env(), name: CHIEF_NAME };
     try {
-      d = await route(context, { ...opts, ...(laptopBrain && { remote: (b) => hands.think(b) }) });
+      if (warmChief && !laptopBrain && !shown.length) {
+        try {
+          d = await warmChief.ask(context, { model: opts.model });
+        } catch (err) {
+          console.warn('[jarvis] warm chief failed, asking cold:', err.message);
+          d = await route(context, opts);
+        }
+      } else d = await route(context, { ...opts, ...(laptopBrain && { remote: (b) => hands.think(b) }) });
     } catch (err) {
       // fork: no Claude login on this machine, but the laptop has one: think there
       // until this machine is signed in (scripts/claude-login.sh).
@@ -3149,6 +3173,20 @@ const server = http.createServer(async (req, res) => {
       send({ t: 'tts', ...piperReady(DATA), replies: voiceOn() });
       return json(res, 200, { ok: true, replies: voiceOn() });
     }
+    // fork: Jarvis's own short lines ("Yes, sir?"), in his Piper voice and
+    // kept, since he says the same few things often.
+    if (req.method === 'POST' && url.pathname === '/api/voice/phrase') {
+      const text = clip((await readBody(req)).text, 160);
+      if (!text || !piperReady(DATA).ok) return json(res, 404, { error: 'No voice.' });
+      const dir = path.join(DATA, 'piper', 'phrases');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, crypto.createHash('sha1').update(text).digest('hex').slice(0, 16) + '.m4a');
+      if (!fs.existsSync(file)) {
+        try { await speak(text, 'chief', { dataDir: DATA, out: file }); } catch (err) { return json(res, 503, { error: err.message }); }
+      }
+      res.writeHead(200, { 'content-type': 'audio/mp4', 'cache-control': 'no-store' });
+      return fs.createReadStream(file).pipe(res);
+    }
     // fork: Jarvis's always-on listening. Like /api/voice, but the audio is
     // thrown away after: most of it is the room, not a message.
     if (req.method === 'POST' && url.pathname === '/api/voice/listen') {
@@ -3413,6 +3451,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
 function shutdown(code = 0) {
   tunnel.drop();
   observer.stop();
+  warmChief?.stop();
   for (const child of running.values()) child.kill('SIGTERM');
   clearTimeout(saveTimer);
   board.flush();

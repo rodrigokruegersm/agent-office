@@ -40,6 +40,13 @@ export class Hands {
   // The chief's routing call on the laptop's Claude login.
   think(body) { return this.call('/think', body, 95_000); }
 
+  // The laptop's app names, remembered for ten minutes.
+  async apps() {
+    if (this.appList && Date.now() - this.appsAt < 600_000) return this.appList;
+    try { this.appList = (await this.call('/apps', {}, 4000)).apps || []; this.appsAt = Date.now(); } catch { this.appList ||= []; }
+    return this.appList;
+  }
+
   // The laptop's project folders, for new work there; [] if it's away.
   async projects() {
     if (!this.configured) return [];

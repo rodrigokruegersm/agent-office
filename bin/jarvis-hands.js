@@ -301,6 +301,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/tabs') return send(200, await tabAction(await readBody(req)));
     if (req.method === 'POST' && req.url === '/app') return send(200, await openApp((await readBody(req)).name));
     if (req.method === 'POST' && req.url === '/session') return send(200, tellSession(await readBody(req)));
+    if (req.method === 'POST' && req.url === '/apps') return send(200, { apps: apps() });
     if (req.method === 'POST' && req.url === '/projects') return send(200, { projects: projects() });
     if (req.method === 'POST' && req.url === '/start') return send(200, startWork(await readBody(req)));
     if (req.method === 'POST' && req.url === '/think') return send(200, await think(await readBody(req)));

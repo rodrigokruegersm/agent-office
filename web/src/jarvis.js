@@ -18,8 +18,9 @@ const AWAKE_MS = 25_000; // listening without the name after a reply
 
 const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch {} return null; };
 export class Jarvis {
-  constructor({ api, speech, notify }) {
-    Object.assign(this, { api, speech, notify });
+  constructor({ api, speech, notify, piper = () => false }) {
+    Object.assign(this, { api, speech, notify, piper });
+    this.playing = 0;
     this.name = 'Jarvis';
     this.on = false;
     this.state = 'off';
@@ -100,7 +101,7 @@ export class Jarvis {
     const rms = Math.sqrt(sum / buf.length);
     const secs = buf.length / this.sr;
     // Deaf while Jarvis talks, so he doesn't answer himself.
-    const talking = this.speech.busy || Date.now() < this.mutedUntil;
+    const talking = this.talking || Date.now() < this.mutedUntil;
     if (talking) { this.phrase = null; this.ring = []; this.ringLen = 0; this.renderSoon(); return; }
 
     const loud = rms > Math.max(0.012, this.floor * 3);
@@ -156,17 +157,42 @@ export class Jarvis {
     if (SLEEP.test(said)) { this.awakeUntil = 0; this.reply('Very good, sir.'); return; }
     this.awakeUntil = Date.now() + AWAKE_MS;
     this.render();
-    try { await this.api('/api/chat', { text: said }); } catch (err) { this.reply(`Something went wrong: ${err.message}`); }
+    // Thinking takes a few seconds; say so if the answer isn't straight back.
+    const asked = Date.now();
+    clearTimeout(this.ackTimer);
+    this.ackTimer = setTimeout(() => { if (!(this.repliedAt > asked) && !this.talking) this.reply('One moment, sir.'); }, 1500);
+    try { await this.api('/api/chat', { text: said }); } catch (err) { clearTimeout(this.ackTimer); this.reply(`Something went wrong: ${err.message}`); }
   }
 
-  reply(text) {
+  // His own lines, in his recorded voice when the office has one.
+  async reply(text) {
+    if (this.piper()) {
+      try {
+        const res = await fetch('/api/voice/phrase', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+        if (res.ok) { this.play(new Audio(URL.createObjectURL(await res.blob()))); return; }
+      } catch {}
+    }
     this.speech.speak(text, 'chief', { force: true });
   }
+
+  // Plays a recording, deaf while it does, so he doesn't hear himself.
+  play(el) {
+    this.playing++;
+    this.renderSoon();
+    let done = false;
+    const end = () => { if (done) return; done = true; this.playing--; this.mutedUntil = Date.now() + 700; this.renderSoon(); };
+    el.addEventListener('ended', end, { once: true });
+    el.addEventListener('error', end, { once: true });
+    el.addEventListener('pause', end, { once: true });
+    return el.play().catch(end);
+  }
+
+  get talking() { return this.speech.busy || this.playing > 0; }
 
   // The office calls this for each chat message; replies keep him awake.
   onMessage(m) {
     if (!this.on || m.from === 'you') return;
-    if (m.from === 'chief') this.awakeUntil = Date.now() + AWAKE_MS;
+    if (m.from === 'chief') { this.awakeUntil = Date.now() + AWAKE_MS; this.repliedAt = Date.now(); clearTimeout(this.ackTimer); }
     this.mutedUntil = Date.now() + 700;
   }
 
@@ -180,7 +206,7 @@ export class Jarvis {
   render() {
     const st = !this.on ? 'off'
       : this.ctx?.state === 'suspended' ? 'blocked'
-      : this.speech.busy ? 'speaking'
+      : this.talking ? 'speaking'
       : this.busy ? 'thinking'
       : this.phrase ? 'hearing'
       : Date.now() < this.awakeUntil ? 'awake'

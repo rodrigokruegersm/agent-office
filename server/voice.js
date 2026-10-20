@@ -124,9 +124,9 @@ const piperBin = (dataDir) => process.env.PIPER_BIN || path.join(PIPER_DIR(dataD
 
 // One voice each, so you know who is talking before you have read a word.
 const PIPER_VOICES = {
-  chief: 'en_GB-cori-high',
+  chief: 'en_GB-alan-medium', // fork: Jarvis
   ada: 'en_US-amy-medium',
-  tunde: 'en_GB-alan-medium',
+  tunde: 'en_GB-northern_english_male-medium',
   mira: 'en_US-kristin-medium',
   kai: 'en_US-ryan-high',
   zola: 'en_GB-alba-medium',
