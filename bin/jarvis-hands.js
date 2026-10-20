@@ -214,12 +214,36 @@ function tellSession({ sessionId, message }) {
   return { sent: true, cwd: s.cwd };
 }
 
+// ---------- thinking for the office ----------
+
+// When the office machine has no Claude login, the chief's routing call runs
+// here instead, on this laptop's login. Only that call: no tools, no settings,
+// no session kept, the flags fixed here. The office sends the model, the
+// answer's schema, the system prompt and the context.
+function think({ model, schema, system, input }) {
+  if (!/^(haiku|sonnet|opus|claude-[\w.-]{1,40})$/.test(String(model))) return Promise.reject(new Error('Bad model.'));
+  const args = ['-p', '--model', model, '--output-format', 'json', '--json-schema', JSON.stringify(schema || {}),
+    '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence',
+    '--system-prompt', String(system || '').slice(0, 40_000)];
+  return new Promise((resolve, reject) => {
+    const child = spawn(CLAUDE, args, { cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+    let out = '', err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 90_000);
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', () => { clearTimeout(timer); resolve({ out, err: clip(err, 300) }); });
+    child.stdin.on('error', () => {});
+    child.stdin.end(String(input || '').slice(0, 300_000));
+  });
+}
+
 // ---------- the service ----------
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let s = '';
-    req.on('data', (c) => { s += c; if (s.length > 50_000) req.destroy(); });
+    req.on('data', (c) => { s += c; if (s.length > 400_000) req.destroy(); });
     req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch { reject(new Error('Bad JSON.')); } });
     req.on('error', reject);
   });
@@ -235,6 +259,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/tabs') return send(200, await tabAction(await readBody(req)));
     if (req.method === 'POST' && req.url === '/app') return send(200, await openApp((await readBody(req)).name));
     if (req.method === 'POST' && req.url === '/session') return send(200, tellSession(await readBody(req)));
+    if (req.method === 'POST' && req.url === '/think') return send(200, await think(await readBody(req)));
     send(404, { error: 'No such action.' });
   } catch (err) {
     send(400, { error: clip(err.message, 300) });

@@ -415,6 +415,8 @@ function send(msg) {
 // fork: a named chief (Jarvis) is talked to out loud and can work the laptop.
 const CHIEF_NAME = String(process.env.OFFICE_CHIEF_NAME || '').trim().slice(0, 30);
 const hands = new Hands(DATA);
+// Set once the chief has found no Claude login here; a saved token clears it on restart.
+let laptopBrain = false;
 const observer = new Observer({
   data: DATA,
   send: (msg) => { const data = JSON.stringify(msg); for (const ws of clients) if (ws.readyState === 1) ws.send(data); },
@@ -1711,6 +1713,25 @@ async function withJarvisContext(context) {
   return at < 0 ? `${extra.join('\n')}\n\n${context}` : `${context.slice(0, at)}\n${extra.join('\n')}\n${context.slice(at)}`;
 }
 
+// Whether claude here is signed in, asked once at startup, so a Jarvis with
+// no login thinks on the laptop from his first word instead of after a timeout.
+function probeLogin() {
+  if (!CHIEF_NAME || !hands.configured) return;
+  const child = spawn(CLAUDE, ['-p', '--model', 'haiku', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', 'Reply with OK.'], { env: auth.env(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { out += d; });
+  const timer = setTimeout(() => child.kill('SIGKILL'), 30_000);
+  child.on('error', () => clearTimeout(timer));
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    if (code !== 0 || /not logged in|\/login/i.test(out)) {
+      laptopBrain = true;
+      console.warn(`[jarvis] claude isn't signed in here (${clip(out, 80) || `exit ${code}`}); thinking on the laptop until it is`);
+    }
+  });
+}
+
 // Carries out a tabs, app or session decision; returns the line to say.
 async function jarvisActs(d) {
   try {
@@ -1794,7 +1815,17 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
       : text;
     let context = chiefContext(said, agents, repo, channel);
     if (CHIEF_NAME) context = await withJarvisContext(context);
-    d = await route(context, { bin: CLAUDE, model: settings.get('chiefModel'), images: shown, env: auth.env(), name: CHIEF_NAME });
+    const opts = { bin: CLAUDE, model: settings.get('chiefModel'), images: shown, env: auth.env(), name: CHIEF_NAME };
+    try {
+      d = await route(context, { ...opts, ...(laptopBrain && { remote: (b) => hands.think(b) }) });
+    } catch (err) {
+      // fork: no Claude login on this machine, but the laptop has one: think there
+      // until this machine is signed in (scripts/claude-login.sh).
+      if (!CHIEF_NAME || laptopBrain || !hands.configured || !/not logged in|\/login|longer than/i.test(err.message)) throw err;
+      laptopBrain = true;
+      console.warn('[jarvis] no Claude login here; thinking on the laptop');
+      d = await route(context, { ...opts, remote: (b) => hands.think(b) });
+    }
     state.chiefCost += d.cost || 0;
     nudgeUsage();
   } finally {
@@ -3361,6 +3392,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   try { fs.writeFileSync(path.join(DATA, 'office-port'), String(PORT)); } catch {}
   afterRestart();
   if (process.env.OFFICE_OBSERVE !== 'off') observer.start();
+  probeLogin();
   if (state.jobs.filter((j) => j.status !== 'working' && j.status !== 'queued').map(adoptNewProject).some(Boolean)) save();
   pump();
   refreshUsage();

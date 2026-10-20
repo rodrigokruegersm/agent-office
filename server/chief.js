@@ -103,9 +103,19 @@ const systemFor = (name) => (name ? BASE + JARVIS(name) : BASE);
 // Routing on the boss's words alone, or on the images too. Only streamed
 // input can carry an image, and the CLI answers a stream with a stream, so
 // that path reads one JSON object per line and keeps the last one.
-export function route(context, { bin = 'claude', model = 'haiku', timeoutMs = 60000, images = [], env = process.env, name = '' } = {}) {
+export function route(context, { bin = 'claude', model = 'haiku', timeoutMs = 60000, images = [], env = process.env, name = '', remote = null } = {}) {
   const shown = canSee(images);
   const system = systemFor(name);
+  // fork: thinking on another machine's login (see Hands.think); words only.
+  if (remote) return remote({ model, schema: SCHEMA, system, input: context }).then(({ out, err }) => {
+    try {
+      const r = JSON.parse(out);
+      const decision = r.structured_output || JSON.parse(r.result);
+      return { ...decision, cost: r.total_cost_usd || 0 };
+    } catch {
+      throw new Error(whyNot(out, err || '', false, false, timeoutMs));
+    }
+  });
   if (!shown.length) return ask(context, { bin, model, timeoutMs, env, system });
   // An image the API won't take (too many pixels, a .png that isn't one)
   // shouldn't cost the boss their answer, so the words go on their own.

@@ -37,6 +37,9 @@ export class Hands {
     return data;
   }
 
+  // The chief's routing call on the laptop's Claude login.
+  think(body) { return this.call('/think', body, 95_000); }
+
   // For the chief's context: the open tabs, or null if the laptop is away.
   async tabs() {
     if (!this.configured) return null;
