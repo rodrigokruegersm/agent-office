@@ -323,7 +323,7 @@ const server = http.createServer(async (req, res) => {
 // stdout and stderr go back as { o } and { e }, the office's { i } goes to
 // claude's stdin, and the exit code comes back as { x }. Closing the socket
 // stops claude. Only folders inside the projects root can be a job's cwd.
-const SAFE_ENV = new Set(['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'OFFICE_JOB_UNLOCKED']);
+const SAFE_ENV = new Set(['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'OFFICE_URL', 'OFFICE_JOB', 'OFFICE_TOKEN']);
 const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
 server.on('upgrade', (req, socket, head) => {
   if (req.url !== '/run' || req.headers.origin || !same(req.headers['x-hands-key'], cfg.key)) return socket.destroy();
