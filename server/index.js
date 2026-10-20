@@ -30,6 +30,7 @@ import * as files from './files.js';
 import { lanAddresses, phoneLinks, qrSvg, qrText } from './phone.js';
 import { Tunnel } from './tunnel.js';
 import { findCloudflared } from './cloudflared.js';
+import { Observer } from './observe/index.js'; // fork: agents the office didn't start
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, '..');
@@ -400,7 +401,7 @@ guests = new Guests(DATA, {
   },
 });
 // Broadcasts that can't change what an agent is doing don't need presence checked.
-const NOT_PRESENCE = new Set(['links', 'visitors', 'remote', 'proc', 'leaderboard', 'auth', 'usage', 'economy']);
+const NOT_PRESENCE = new Set(['links', 'visitors', 'remote', 'proc', 'leaderboard', 'auth', 'usage', 'economy', 'external']);
 
 function send(msg) {
   const data = JSON.stringify(msg);
@@ -408,6 +409,13 @@ function send(msg) {
   guests?.feed(msg);
   if (!NOT_PRESENCE.has(msg.t)) links.sendPresence();
 }
+// fork: sessions, bots and cron jobs the office didn't start. Sent to our own
+// browsers only: never to linked offices or guests.
+const observer = new Observer({
+  data: DATA,
+  send: (msg) => { const data = JSON.stringify(msg); for (const ws of clients) if (ws.readyState === 1) ws.send(data); },
+  ownSessions: () => new Set(state.jobs.map((j) => j.sessionId).filter(Boolean)),
+});
 const publicJob = (j, tail = 40) => {
   const { stopRequested, lastTurn, sent, handoffs, staged, ...rest } = j;
   return { ...rest, log: j.log.slice(-tail) };
@@ -449,6 +457,7 @@ const snapshot = () => ({
   voice: voiceReady(DATA),
   tts: { ...piperReady(DATA), replies: voiceOn() },
   contextLimit: contextLimit(),
+  external: observer.list(),
 });
 
 // ---------- what the agents are costing this machine ----------
@@ -1998,6 +2007,15 @@ function standupContext(facts) {
   }
   const open = state.jobs.filter((j) => j.status === 'queued' && !j.wantAgent);
   if (open.length) lines.push('', `Queued for whoever is free: ${open.map((j) => `"${j.title}" in ${j.repo}`).join('; ')}`);
+  // fork: contractors don't give updates, but the chief's wrap should say
+  // what's waiting on the boss out there.
+  const contractors = observer.list();
+  if (contractors.length) {
+    lines.push('', 'Contractors (agents outside the office; mention them only in the wrap, and only what needs the boss):');
+    for (const a of contractors.slice(0, 12)) {
+      lines.push(`- ${a.name} (${a.source}${a.project ? `, ${a.project}` : ''}): ${a.state === 'waiting' ? 'WAITING ON THE BOSS' : a.state === 'error' ? 'FAILED' : a.state}. ${clip(a.activity, 140)}`);
+    }
+  }
   return lines.join('\n');
 }
 
@@ -2829,6 +2847,16 @@ const server = http.createServer(async (req, res) => {
     if (oldCookie(req)) res.setHeader('set-cookie', keyCookie(req));
     return serveStatic(req, res);
   }
+  // fork: reports from hooks, bots and cron jobs, with the observe key, which
+  // can only say what an agent is doing.
+  if (req.method === 'POST' && (url.pathname === '/api/observe' || url.pathname === '/api/observe/claude-hook')) {
+    const k = req.headers['x-observe-key'] || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!observer.sameKey(k) && !hasKey(req)) return json(res, 401, { error: 'Send the observe key in x-observe-key.' });
+    try {
+      const body = await readBody(req, 50_000);
+      return json(res, 200, url.pathname === '/api/observe' ? observer.report(body) : observer.hook(body));
+    } catch (err) { return json(res, 400, { error: err.message }); }
+  }
   // Agents prove who they are with their job token (caller); everyone else
   // with the office key.
   if (parts[1] !== 'agent' && !hasKey(req)) return json(res, 401, { error: 'Open the office with its link first.' });
@@ -3077,6 +3105,11 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, economy.status());
       } catch (err) { return json(res, 400, { error: err.message }); }
     }
+    if (req.method === 'GET' && url.pathname === '/api/external') return json(res, 200, { agents: observer.list() });
+    if (req.method === 'POST' && url.pathname === '/api/external/dismiss') {
+      const { id } = await readBody(req);
+      return json(res, observer.dismiss(String(id || '')) ? 200 : 404, { ok: true });
+    }
     if (req.method === 'POST' && url.pathname === '/api/standup') { runStandup(true); return json(res, 202, { ok: true }); }
     if (req.method === 'POST' && url.pathname === '/api/restart') {
       const { now } = await readBody(req);
@@ -3203,7 +3236,7 @@ server.on('upgrade', (req, socket, head) => {
     // The host's office, as its guest. Our own fields fill what the host
     // doesn't send, so the page has everything it expects.
     return wss.handleUpgrade(req, socket, head, (ws) => guests.visit(ws, visit[1], () => ({
-      ...snapshot(), dismissed: [], standup: null, chiefBusy: false, procs: null, visitors: [], remote: [],
+      ...snapshot(), dismissed: [], standup: null, chiefBusy: false, procs: null, visitors: [], remote: [], external: [],
     })));
   }
   socket.destroy();
@@ -3221,7 +3254,8 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   // goes to this terminal (or the supervisor's), never to a log file. The
   // desktop app sends our output to a log and reads the key itself, so there
   // the line goes without it.
-  const desktop = process.env.OFFICE_DESKTOP === '1';
+  // fork: OFFICE_SERVICE=1 (launchd) writes to a log file too, so no key there either.
+  const desktop = process.env.OFFICE_DESKTOP === '1' || process.env.OFFICE_SERVICE === '1';
   console.log(`Agent Office open on ${desktop ? `http://localhost:${PORT}/` : keyLink()}  (projects in ${ROOT})`);
   // The phone link, with a QR to scan. Same care: terminal only, and the
   // desktop app shows it in the office instead.
@@ -3235,6 +3269,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   // For `agentoffice --link`, which can't know which free port we got.
   try { fs.writeFileSync(path.join(DATA, 'office-port'), String(PORT)); } catch {}
   afterRestart();
+  if (process.env.OFFICE_OBSERVE !== 'off') observer.start();
   if (state.jobs.filter((j) => j.status !== 'working' && j.status !== 'queued').map(adoptNewProject).some(Boolean)) save();
   pump();
   refreshUsage();
@@ -3244,6 +3279,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
 
 function shutdown(code = 0) {
   tunnel.drop();
+  observer.stop();
   for (const child of running.values()) child.kill('SIGTERM');
   clearTimeout(saveTimer);
   board.flush();

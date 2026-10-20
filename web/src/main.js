@@ -23,6 +23,7 @@ import { Agent } from './agent.js';
 import { BreakRoom } from './breakroom.js';
 import { PoolRoom } from './pool.js';
 import { Visitors } from './visitors.js';
+import { External } from './external.js'; // fork
 import { Confetti } from './fx.js';
 import { AgentChat } from './talk.js';
 import { Hud, api } from './hud.js';
@@ -267,6 +268,8 @@ const chief = new Agent(CHIEF, world, labels, { desk: office.reception, face: 0 
 const breakRoom = new BreakRoom();
 const poolRoom = new PoolRoom(scene, office);
 const visitors = new Visitors({ world, labels, camera, canvas: renderer.domElement });
+// fork: contractors, set up below once notify() exists.
+let external = null;
 chief.want = 'desk';
 chief.teleport('desk');
 
@@ -485,6 +488,7 @@ function applyLook(economy) {
 
 function handle(msg) {
   if (visitors.handle(msg)) return;
+  if (external?.handle(msg)) return;
   if (msg.economy) applyLook(msg.economy);
   if (msg.t === 'hello') {
     setVisiting(msg.visiting);
@@ -653,6 +657,7 @@ function notify(title, body) {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { unseen = 0; document.title = 'Agent Office'; }
 });
+external = new External({ world, labels, camera, canvas: renderer.domElement, api, notify, sound });
 // Ask once, on the first message you send.
 document.getElementById('composer').addEventListener('submit', () => {
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
@@ -830,7 +835,7 @@ function aim(e) {
   ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
 }
-const people = () => [...app.agents.values(), chief].map((a) => a.root);
+const people = () => [...app.agents.values(), chief, ...(external?.list || [])].map((a) => a.root);
 const build = initBuild({ renderer, camera, controls, scene, office, layoutId: storedLayout, aim, ray });
 
 let down = null;
@@ -840,6 +845,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   aim(e);
   const hit = ray.intersectObjects(people(), true)[0];
   if (!hit) { if (chat.id) { chat.close(); app.select(null); } return; }
+  if (hit.object.userData.external) return; // fork: external.js opens its own panel
   if (hit.object.userData.agentId === 'chief') {
     hud.focusInput();
     chief.say('Tell me what you need.', '', 3000);
@@ -926,6 +932,7 @@ function frame() {
   poolRoom.update(idlers, t, dt);
   chief.update(dt, t);
   visitors.update(dt, t);
+  external?.update(dt, t);
   confetti.update(dt);
   office.globe.rotation.y += dt * 0.4;
 
@@ -940,7 +947,7 @@ function frame() {
   // Zoomed far out, names stay but speech bubbles step back.
   const isFar = camera.position.distanceTo(controls.target) > HOME.radius * 1.25;
   const onScreen = [];
-  for (const a of [...app.agents.values(), chief, ...visitors.list]) {
+  for (const a of [...app.agents.values(), chief, ...visitors.list, ...(external?.list || [])]) {
     if (isFar !== far) { a.label.classList.toggle('far', isFar); a.labelDirty = true; }
     a.placeLabel(camera, viewW, viewH);
     if (a.onScreen) onScreen.push(a);

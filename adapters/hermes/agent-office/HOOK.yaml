@@ -1,0 +1,8 @@
+name: agent-office
+description: Shows this Hermes agent in Agent Office (working, idle, failed) by posting each step to the office's observe endpoint.
+events:
+  - agent:start
+  - agent:step
+  - agent:end
+  - session:end
+  - session:reset
