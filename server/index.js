@@ -3166,8 +3166,10 @@ const server = http.createServer(async (req, res) => {
       const name = String(tool).replace(/^mcp__/, '').replace(/__/g, ' · ');
       if (me.approval?.tool !== name) {
         me.approval = { tool: name, at: Date.now() };
-        addLog(me, { kind: 'error', summary: `Wants to use ${name}: needs the boss's approval`, blocked: true });
-        post('chief', `${nameOf(me.agentId)} wants to use ${name} on ${me.repo}${input && input !== '{}' ? ` (${clip(input, 160)})` : ''}. Say "approve" to let them, sir.`, { jobId: me.id, kind: 'flag', channel: channelOf(me.channel) });
+        addLog(me, { kind: 'error', summary: `Wants to use ${name}: needs the boss's approval${input && input !== '{}' ? `. Details: ${clip(input, 400)}` : ''}`, blocked: true });
+        // Said out loud, so the tool's name and no raw details; they're in the job's log.
+        const spoken = name.replace(/^claude_ai_/i, '').replace(/[_-]+/g, ' ').replace(/ · /g, ', ');
+        post('chief', `${nameOf(me.agentId)} wants to use ${spoken} on ${me.repo}. Say "approve" to let them, sir.`, { jobId: me.id, kind: 'flag', channel: channelOf(me.channel) });
         pushJob(me);
       }
       return json(res, 200, { allowed: false });
