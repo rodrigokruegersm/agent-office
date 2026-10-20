@@ -45,7 +45,8 @@ export class Jarvis {
     this.wake = WAKE(name);
     this.el.hidden = false;
     this.render();
-    if (store('jarvis.on') === '1' && !this.on) this.start().catch(() => this.render());
+    // On unless turned off: the first visit asks for the microphone straight away.
+    if (store('jarvis.on') !== '0' && !this.on) this.start().catch(() => this.render());
   }
 
   get secure() { return window.isSecureContext && !!navigator.mediaDevices?.getUserMedia; }
