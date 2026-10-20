@@ -13,6 +13,11 @@ also:
   office job on the same session. One on your laptop runs its next turn there,
   headless, with edits allowed. Only idle sessions take messages; a busy one is
   left alone;
+- **starts new agents on your laptop**: "in bridged-portal, fix the login
+  redirect" starts a fresh Claude Code session in `~/workspaces/bridged-portal`
+  there (edits allowed, up to 4 at once). It shows up as a contractor, and you
+  can follow up with it by name. Office projects still go to office staff, unless
+  you say "on the laptop" or the office machine isn't signed in to Claude yet;
 - **works your laptop's browser**: "open Gmail", "search for flights to
   Lisbon", "switch to the launch bible doc", "close the YouTube tab", "reload
   the dashboard";
@@ -66,6 +71,10 @@ An office running as a service can't use the keychain login. Run
 `scripts/claude-login.sh` on the office machine once, in a terminal (over
 `ssh -t` is fine). It runs `claude setup-token`, saves the token to
 `<data>/claude-token` (readable only by you) and restarts the office.
+
+Until then Jarvis still works: he notices at startup, thinks on the laptop's
+Claude login instead (the laptop must be awake), and starts new work on the
+laptop rather than office jobs that would fail.
 
 ## Checking him from a terminal
 
