@@ -61,6 +61,7 @@ body.tower-on #labels { visibility: hidden; }
 .working > .tw-room-head .tw-dot, .tw-rack.working .tw-dot { background: #22a35a; box-shadow: 0 0 0 0 rgb(34 163 90 / 0.5); animation: tw-pulse 1.6s infinite; }
 .waiting > .tw-room-head .tw-dot, .tw-rack.error .tw-dot, .tw-rack.waiting .tw-dot { background: var(--bad); }
 .queued > .tw-room-head .tw-dot { background: #f59e0b; }
+.resting > .tw-room-head .tw-dot { background: #7c93b5; }
 @keyframes tw-pulse { 70% { box-shadow: 0 0 0 7px rgb(34 163 90 / 0); } }
 @media (prefers-reduced-motion: reduce) { .tw-dot { animation: none !important; } }
 

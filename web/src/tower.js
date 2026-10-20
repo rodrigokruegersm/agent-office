@@ -164,7 +164,10 @@ export class Tower {
 
   room(p) {
     const { work, done } = p.room;
-    const state = work.some((w) => w.state === 'waiting' || w.state === 'error') ? 'waiting' : work.some((w) => w.state === 'working') ? 'working' : work.length ? 'queued' : 'idle';
+    const state = work.some((w) => w.state === 'waiting' || w.state === 'error') ? 'waiting'
+      : work.some((w) => w.state === 'working') ? 'working'
+      : work.some((w) => w.state === 'queued') ? 'queued'
+      : work.length ? 'resting' : 'idle';
     const card = el('button', `tw-room ${state}`);
     card.type = 'button';
     const head = el('div', 'tw-room-head');
