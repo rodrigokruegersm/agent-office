@@ -18,6 +18,8 @@ const TAIL = 256 * 1024; // how far back a newly found session is read
 const READ_MAX = 1024 * 1024; // the most read from one file in one poll
 
 const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+// <session>.jsonl only: OpenClaw keeps <session>.trajectory.jsonl and the like beside them.
+const isTranscript = (name) => name.endsWith('.jsonl') && !path.basename(name, '.jsonl').includes('.');
 
 // Tools that stop the session until the boss answers.
 const ASKS = { AskUserQuestion: 'Asking you a question', ExitPlanMode: 'Plan ready for your review' };
@@ -89,7 +91,7 @@ export class TranscriptWatcher {
     // sessions, just later.
     try {
       this.fsw = fs.watch(this.dir, { recursive: true }, (_, name) => {
-        if (!name || !name.endsWith('.jsonl') || name.split(path.sep).length !== (this.sub ? 3 : 2)) return;
+        if (!name || !isTranscript(name) || name.split(path.sep).length !== (this.sub ? 3 : 2)) return;
         if (this.sub && name.split(path.sep)[1] !== this.sub) return;
         this.hot.add(path.join(this.dir, name));
       });
@@ -113,7 +115,7 @@ export class TranscriptWatcher {
       let names;
       try { names = fs.readdirSync(pdir); } catch { continue; }
       for (const n of names) {
-        if (!n.endsWith('.jsonl')) continue;
+        if (!isTranscript(n)) continue;
         const f = path.join(pdir, n);
         try { if (fs.statSync(f).mtimeMs >= since) this.hot.add(f); } catch {}
       }

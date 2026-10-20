@@ -29,7 +29,8 @@ die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 if [[ "${1:-}" == "--uninstall" ]]; then
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
-  tailscale serve --https=443 off 2>/dev/null || true
+  TS="/Applications/Tailscale.app/Contents/MacOS/Tailscale"; [[ -x "$TS" ]] || TS=tailscale
+  "$TS" serve reset 2>/dev/null || true
   node "$REPO/scripts/install-hooks.mjs" --uninstall || true
   say "Office service, tailnet address and hooks removed. Data is still in $DATA."
   exit 0
@@ -38,9 +39,16 @@ fi
 NODE="$(command -v node)" || die "Node.js 20+ is needed (brew install node)."
 [[ "$("$NODE" -p 'process.versions.node.split(".")[0]')" -ge 20 ]] || die "Node.js 20+ is needed; this is $("$NODE" -v)."
 CLAUDE="$(command -v claude)" || die "Claude Code isn't on PATH. Install it and sign in (claude, then /login)."
-command -v tailscale >/dev/null || die "Tailscale isn't installed (brew install tailscale, or the Mac app)."
-TSHOST="$(tailscale status --json | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write((j.Self&&j.Self.DNSName||"").replace(/\.$/,""))})')"
+# The Mac app's own CLI matches its daemon; a brew CLI may be older.
+TS="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+[[ -x "$TS" ]] || TS="$(command -v tailscale)" || die "Tailscale isn't installed (brew install tailscale, or the Mac app)."
+TSJSON="$("$TS" status --json 2>/dev/null)"
+TSHOST="$(printf '%s' "$TSJSON" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write((j.Self&&j.Self.DNSName||"").replace(/\.$/,""))})')"
 [[ -n "$TSHOST" ]] || die "Tailscale isn't connected. Run: tailscale up"
+# https needs HTTPS certificates turned on for the tailnet; without them the
+# office is served over plain http, still only inside the (encrypted) tailnet.
+HTTPS="$(printf '%s' "$TSJSON" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write((j.CertDomains||[]).length?"1":"")})')"
+SCHEME="$([[ -n "$HTTPS" ]] && echo https || echo http)"
 mkdir -p "$ROOT" "$DATA" "$(dirname "$PLIST")" "$(dirname "$LOG")"
 
 say "1/5  Installing and building in $REPO"
@@ -87,8 +95,9 @@ for _ in $(seq 1 30); do [[ -s "$DATA/office-port" ]] && break; sleep 1; done
 [[ -s "$DATA/office-port" ]] || die "The office didn't start. See $LOG"
 PORT="$(cat "$DATA/office-port")"
 
-say "3/5  Putting it on your tailnet: https://$TSHOST"
-tailscale serve --bg "$PORT" >/dev/null
+say "3/5  Putting it on your tailnet: $SCHEME://$TSHOST"
+if [[ -n "$HTTPS" ]]; then "$TS" serve --bg "$PORT" >/dev/null
+else "$TS" serve --bg --http=80 "$PORT" >/dev/null; fi
 
 say "4/5  Adding the Claude Code hooks"
 OFFICE_DATA="$DATA" "$NODE" "$REPO/scripts/install-hooks.mjs" --data "$DATA"
@@ -98,9 +107,17 @@ cat <<DONE
 
 Open this once on your MacBook and phone (it signs that browser in; treat it like a password):
 
-  https://$TSHOST/?key=$(cat "$DATA/office-key")
+  $SCHEME://$TSHOST/?key=$(cat "$DATA/office-key")
 
 Then add it to the Dock (Chrome: Install app; Safari: File > Add to Dock) or the phone's home screen.
+DONE
+[[ -n "$HTTPS" ]] || cat <<NOHTTPS
+
+Served over http for now: Tailscale encrypts it anyway, but browsers only
+allow notifications and app installs over https. Turn on HTTPS Certificates
+at https://login.tailscale.com/admin/dns and run this script again.
+NOHTTPS
+cat <<DONE
 
   Logs:        tail -f $LOG
   Restart:     launchctl kickstart -k gui/$UID/$LABEL
