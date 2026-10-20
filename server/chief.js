@@ -244,7 +244,7 @@ export class WarmChief {
     child.on('close', (code) => {
       if (this.child === child) {
         this.child = null;
-        if (code) console.warn(`[jarvis] warm chief stopped (${code}): ${err.trim().split('\n').pop() || buf.slice(-200)}`);
+        console.warn(`[jarvis] warm chief stopped (${code}): ${err.trim().split('\n').pop() || buf.slice(-200)}`);
       }
       if (this.waiting) { this.waiting.reject(new Error('The chief stopped mid-thought.')); this.waiting = null; }
     });

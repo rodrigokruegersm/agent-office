@@ -1722,7 +1722,7 @@ async function withJarvisContext(context) {
 // warm process starts now; not, he thinks on the laptop from his first word
 // instead of after a timeout.
 function probeLogin() {
-  if (!CHIEF_NAME || !hands.configured) return;
+  if (!CHIEF_NAME) return;
   const child = spawn(CLAUDE, ['-p', '--model', 'haiku', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', 'Reply with OK.'], { env: auth.env(), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
@@ -1734,6 +1734,7 @@ function probeLogin() {
     if (code === 0 && !/not logged in|\/login/i.test(out)) {
       warmChief = new WarmChief({ bin: CLAUDE, env: () => auth.env(), name: CHIEF_NAME });
       warmChief.warm(settings.get('chiefModel'));
+      console.log(`[jarvis] signed in; thinking here on ${settings.get('chiefModel')}, kept warm`);
       return;
     }
     laptopBrain = true;
