@@ -10,6 +10,8 @@
 # you) and the office restarts to pick it up.
 
 set -euo pipefail
+# claude is a node script; ssh sessions start without Homebrew on PATH.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 DATA="${OFFICE_DATA:-$HOME/.agent-office}"
 CLAUDE="$(command -v claude || echo /opt/homebrew/bin/claude)"
 LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
