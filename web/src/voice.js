@@ -85,9 +85,10 @@ export function voiceFile(blob) {
 // One voice each, so you know who's talking before you've read a word. These
 // are preferences in order; whatever the machine actually has gets used.
 const VOICES = {
-  chief: ['Moira', 'Fiona', 'Serena', 'Karen'],
+  // fork: the chief is Jarvis: a British butler.
+  chief: ['Daniel', 'Arthur', 'Oliver', 'Moira'],
   ada: ['Samantha', 'Ava', 'Allison', 'Susan'],
-  tunde: ['Daniel', 'Oliver', 'Arthur', 'Alex'],
+  tunde: ['Oliver', 'Alex', 'Reed', 'Arthur'],
   mira: ['Karen', 'Zoe', 'Tessa', 'Fiona'],
   kai: ['Reed', 'Tom', 'Alex', 'Rocko'],
   zola: ['Tessa', 'Nicky', 'Joelle', 'Samantha'],

@@ -136,6 +136,12 @@ export class Observer {
       name: clip(body.name, 40) || rawId.slice(0, 40),
       project: clip(body.project, 60),
       state, station, activity, tool,
+      // A laptop's sessions (bin/jarvis-hands.js) say where they live, so the
+      // chief can send them messages.
+      ...(body.host && { host: clip(body.host, 40) }),
+      ...(body.cwd && { cwd: clip(body.cwd, 400) }),
+      ...(body.sessionId && /^[\w-]{8,80}$/.test(body.sessionId) && { sessionId: body.sessionId }),
+      ...(body.title && { title: clip(body.title, 100) }),
     });
     return { ok: true, id };
   }
@@ -175,7 +181,7 @@ export class Observer {
     const source = ev.source || 'claude';
     const id = `${source}:${ev.sessionId}`;
     const cur = this.agents.get(id);
-    const label = { source, name: ev.name || projectName(ev.cwd) || 'Claude', project: projectName(ev.cwd), sessionId: ev.sessionId, title: ev.title || '' };
+    const label = { source, name: ev.name || projectName(ev.cwd) || 'Claude', project: projectName(ev.cwd), sessionId: ev.sessionId, title: ev.title || '', cwd: ev.cwd || '' };
     if (ev.meta) {
       if (cur && (cur.name !== label.name || (label.title && cur.title !== label.title))) {
         cur.name = label.name;

@@ -1,0 +1,30 @@
+/* ---------- fork: Jarvis, hands-free (see jarvis.js) ---------- */
+
+.jarvis-pill {
+  all: unset; cursor: pointer; box-sizing: border-box;
+  position: fixed; z-index: 30001; left: 50%; bottom: 92px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 10px; border-radius: 999px;
+  background: var(--pane, var(--surface)); border: 1px solid var(--pane-edge, transparent); color: var(--ink);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 0.22);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5);
+  font-size: 13px; font-weight: 600; white-space: nowrap; max-width: calc(100vw - 32px);
+}
+.jarvis-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.jv-text { overflow: hidden; text-overflow: ellipsis; }
+.jv-orb {
+  --c: #8a8f9c;
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  background: radial-gradient(circle at 35% 35%, #fff 0 8%, var(--c) 40%, color-mix(in srgb, var(--c) 60%, #000) 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent);
+  transition: box-shadow 0.2s, background 0.2s;
+}
+.jarvis-pill[data-state="listening"] .jv-orb { --c: #3b82f6; }
+.jarvis-pill[data-state="awake"] .jv-orb { --c: #22c3ee; animation: jv-breathe 1.6s ease-in-out infinite; }
+.jarvis-pill[data-state="hearing"] .jv-orb { --c: #22c3ee; animation: jv-pulse 0.5s ease-in-out infinite; }
+.jarvis-pill[data-state="thinking"] .jv-orb { --c: #f59e0b; animation: jv-pulse 0.8s ease-in-out infinite; }
+.jarvis-pill[data-state="speaking"] .jv-orb { --c: #10b981; animation: jv-pulse 0.4s ease-in-out infinite; }
+.jarvis-pill[data-state="blocked"] .jv-orb { --c: #e5484d; }
+@keyframes jv-pulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--c) 10%, transparent); } }
+@keyframes jv-breathe { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .jv-orb { animation: none !important; } }
+@media (max-width: 860px) { .jarvis-pill { bottom: auto; top: 12px; } }

@@ -24,7 +24,13 @@ export function canSee(files) {
 const SCHEMA = {
   type: 'object',
   properties: {
-    action: { type: 'string', enum: ['followup', 'new', 'dismiss', 'recall', 'clear', 'standup', 'ask', 'chat'] },
+    action: { type: 'string', enum: ['followup', 'new', 'dismiss', 'recall', 'clear', 'standup', 'ask', 'chat', 'tabs', 'app', 'session'] },
+    // fork: Jarvis's hands on the boss's laptop, and messages to outside sessions.
+    tabOp: { type: 'string', enum: ['list', 'open', 'search', 'focus', 'close', 'reload'] },
+    url: { type: 'string' },
+    query: { type: 'string' },
+    app: { type: 'string' },
+    sessionId: { type: 'string' },
     jobId: { type: 'string' },
     agentId: { type: 'string' },
     agentIds: { type: 'array', items: { type: 'string' } },
@@ -54,7 +60,7 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
-const SYSTEM = `You are the chief of staff in an office of coding agents. The boss posts messages in the office chat. For each one, decide who handles it.
+const BASE = `You are the chief of staff in an office of coding agents. The boss posts messages in the office chat. For each one, decide who handles it.
 
 Actions:
 - "followup": the message adds to, corrects, or asks about a job that already exists (working, queued or recently finished). Give its jobId. Prefer this whenever the message plausibly relates to an open job, especially the job of an agent the boss tagged. Set "escalate": true only when the boss is saying a finished job's work is wrong, incomplete, or that the agent missed the point — the second go then runs on a stronger model.
@@ -79,19 +85,35 @@ Images. A screenshot or mockup the boss attaches is shown to you with the messag
 
 "say" is one short, warm line for the chat, in plain words, e.g. "Ada's on it." or "Passing that to Tunde, it fits what they're doing." Refer to agents only by name or as "they"; never "he", "she", "him" or "her". Never claim work is done, and never call a job done while its agent is still waiting on the boss's answer; say it is waiting on them.`;
 
+// fork: when the chief has a name (OFFICE_CHIEF_NAME, e.g. Jarvis), the boss
+// mostly talks to it out loud, it can work the laptop, and it oversees the
+// Claude sessions outside the office too.
+const JARVIS = (name) => `
+
+Your name is ${name}. You are the boss's right hand. The boss usually talks to you out loud, and your "say" is read aloud to them: one or two short spoken sentences, natural and a little dry, never lists, markdown, ids, paths or URLs unless they ask. Address the boss as "sir" now and then, not every time. The boss's words reach you through speech recognition, so read past small mishearings (a project or agent name that sounds close is that one).
+
+More actions:
+- "tabs": work the browser on the boss's laptop. Set "tabOp": "list" (to answer what's open, answer from "Laptop tabs" with "chat" instead when they're listed), "open" with "url" (a full address; for a well-known site use its real address, e.g. "open Gmail" is https://mail.google.com), "search" with "query" (a web search), "focus" to switch to a tab and "close" or "reload" a tab, each with "query": words from that tab's title or address as listed. Say what you did in a few words, e.g. "Opening Gmail."
+- "app": bring an app on the laptop to the front, "app": its name (e.g. "Spotify", "WhatsApp", "Claude", "Notion Calendar").
+- "session": pass a message to one of the Claude Code sessions listed under "Contractors" (sessions the boss runs outside the office, on this machine or the laptop). Give "sessionId" (exactly as listed) and "brief" (the message, in the boss's words). Only for a session that is idle; if it is working, say it's busy; if it's waiting on the boss, tell them what it is waiting for. Office staff jobs are "followup", never "session".
+For "what's everyone doing" or "status", answer with "chat" from Staff, Queued, Recently finished and Contractors together, briefly: who's busy on what, anything waiting on the boss first.`;
+
+const systemFor = (name) => (name ? BASE + JARVIS(name) : BASE);
+
 // Routing on the boss's words alone, or on the images too. Only streamed
 // input can carry an image, and the CLI answers a stream with a stream, so
 // that path reads one JSON object per line and keeps the last one.
-export function route(context, { bin = 'claude', model = 'haiku', timeoutMs = 60000, images = [], env = process.env } = {}) {
+export function route(context, { bin = 'claude', model = 'haiku', timeoutMs = 60000, images = [], env = process.env, name = '' } = {}) {
   const shown = canSee(images);
-  if (!shown.length) return ask(context, { bin, model, timeoutMs, env });
+  const system = systemFor(name);
+  if (!shown.length) return ask(context, { bin, model, timeoutMs, env, system });
   // An image the API won't take (too many pixels, a .png that isn't one)
   // shouldn't cost the boss their answer, so the words go on their own.
-  return ask(context, { bin, model, timeoutMs, env, images: shown })
-    .catch(() => ask(context, { bin, model, timeoutMs, env }));
+  return ask(context, { bin, model, timeoutMs, env, images: shown, system })
+    .catch(() => ask(context, { bin, model, timeoutMs, env, system }));
 }
 
-function ask(context, { bin, model, timeoutMs, env, images }) {
+function ask(context, { bin, model, timeoutMs, env, images, system }) {
   const streamed = !!images?.length;
   return new Promise((resolve, reject) => {
     const args = [
@@ -102,7 +124,7 @@ function ask(context, { bin, model, timeoutMs, env, images }) {
       ...(streamed ? ['--input-format', 'stream-json', '--verbose'] : []),
       '--json-schema', JSON.stringify(SCHEMA),
       '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence',
-      '--system-prompt', SYSTEM,
+      '--system-prompt', system,
     ];
     const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '';

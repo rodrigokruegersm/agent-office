@@ -24,6 +24,7 @@ import { BreakRoom } from './breakroom.js';
 import { PoolRoom } from './pool.js';
 import { Visitors } from './visitors.js';
 import { External } from './external.js'; // fork
+import { Jarvis } from './jarvis.js'; // fork
 import { Confetti } from './fx.js';
 import { AgentChat } from './talk.js';
 import { Hud, api } from './hud.js';
@@ -233,7 +234,7 @@ const app = {
   },
   person: (from) => {
     if (from === 'you') return { name: 'You', color: '#c9c1b4' };
-    if (from === 'chief') return { name: 'Chief of Staff', color: CHIEF.shirt, look: CHIEF };
+    if (from === 'chief') return { name: app.chiefName || 'Chief of Staff', color: CHIEF.shirt, look: CHIEF };
     const s = app.staff.find((x) => x.id === from);
     return { name: s?.name || from, color: s?.shirt || '#999', look: s };
   },
@@ -268,8 +269,9 @@ const chief = new Agent(CHIEF, world, labels, { desk: office.reception, face: 0 
 const breakRoom = new BreakRoom();
 const poolRoom = new PoolRoom(scene, office);
 const visitors = new Visitors({ world, labels, camera, canvas: renderer.domElement });
-// fork: contractors, set up below once notify() exists.
+// fork: contractors and Jarvis, set up below once notify() exists.
 let external = null;
+let jarvis = null;
 chief.want = 'desk';
 chief.teleport('desk');
 
@@ -491,6 +493,10 @@ function handle(msg) {
   if (external?.handle(msg)) return;
   if (msg.economy) applyLook(msg.economy);
   if (msg.t === 'hello') {
+    // fork: a named chief (Jarvis) can be talked to hands-free.
+    app.chiefName = msg.visiting ? '' : msg.chiefName || '';
+    if (app.chiefName) chief.rename(app.chiefName);
+    jarvis?.setName(app.chiefName);
     setVisiting(msg.visiting);
     app.staff = msg.staff;
     if (!msg.visiting) hud.renderOwner(msg.owner);
@@ -658,6 +664,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { unseen = 0; document.title = 'Agent Office'; }
 });
 external = new External({ world, labels, camera, canvas: renderer.domElement, api, notify, sound });
+jarvis = new Jarvis({ api, speech, notify });
 // Ask once, on the first message you send.
 document.getElementById('composer').addEventListener('submit', () => {
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
@@ -725,6 +732,7 @@ paintSpeak();
 // Agent-to-agent asides already have their own knock, and talking over your
 // own recording would only feed the microphone.
 function sayAloud(m) {
+  jarvis?.onMessage(m);
   if (tts.ok) return; // the server is recording this one properly
   if (!speech.on || m.from === 'you' || m.to || m.kind === 'chill' || recorder.active) return;
   speech.speak(m.text, m.from);

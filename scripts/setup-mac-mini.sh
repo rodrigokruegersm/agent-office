@@ -79,6 +79,7 @@ cat > "$PLIST" <<PLIST
     <key>OFFICE_SERVICE</key><string>1</string>
     <key>BANTER</key><string>off</string>
     <key>CHIEF_MODEL</key><string>sonnet</string>
+    <key>OFFICE_CHIEF_NAME</key><string>${OFFICE_CHIEF_NAME:-Jarvis}</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

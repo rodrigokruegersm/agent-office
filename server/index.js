@@ -31,6 +31,7 @@ import { lanAddresses, phoneLinks, qrSvg, qrText } from './phone.js';
 import { Tunnel } from './tunnel.js';
 import { findCloudflared } from './cloudflared.js';
 import { Observer } from './observe/index.js'; // fork: agents the office didn't start
+import { Hands } from './hands.js'; // fork: Jarvis's hands on the boss's laptop
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, '..');
@@ -411,6 +412,9 @@ function send(msg) {
 }
 // fork: sessions, bots and cron jobs the office didn't start. Sent to our own
 // browsers only: never to linked offices or guests.
+// fork: a named chief (Jarvis) is talked to out loud and can work the laptop.
+const CHIEF_NAME = String(process.env.OFFICE_CHIEF_NAME || '').trim().slice(0, 30);
+const hands = new Hands(DATA);
 const observer = new Observer({
   data: DATA,
   send: (msg) => { const data = JSON.stringify(msg); for (const ws of clients) if (ws.readyState === 1) ws.send(data); },
@@ -458,6 +462,7 @@ const snapshot = () => ({
   tts: { ...piperReady(DATA), replies: voiceOn() },
   contextLimit: contextLimit(),
   external: observer.list(),
+  chiefName: CHIEF_NAME,
 });
 
 // ---------- what the agents are costing this machine ----------
@@ -1666,7 +1671,7 @@ function chiefContext(text, agents, repo, channel = GENERAL) {
   lines.push('', `This message is in channel #${channel}. Channels: ${state.channels.map((c) => '#' + c.id).join(', ')}.`);
   lines.push(`You can only see #${channel}'s history below. A job's own channel is on its line above; never guess where something was discussed.`, '', `Recent chat in #${channel}:`);
   for (const m of state.chat.filter((x) => channelOf(x.channel) === channel).slice(-9, -1)) {
-    const who = (m.from === 'you' ? 'Boss' : m.from === 'chief' ? 'Chief' : nameOf(m.from)) + (m.to ? ` → ${nameOf(m.to)}` : '');
+    const who = (m.from === 'you' ? 'Boss' : m.from === 'chief' ? CHIEF_NAME || 'Chief' : nameOf(m.from)) + (m.to ? ` → ${nameOf(m.to)}` : '');
     const reacts = Object.keys(m.reactions || {}).join('');
     lines.push(`${who}: ${m.text.slice(0, 200).replace(/\n/g, ' ')}${reacts ? ` [reactions: ${reacts}]` : ''}`);
   }
@@ -1675,6 +1680,75 @@ function chiefContext(text, agents, repo, channel = GENERAL) {
   if (agents.length > 1) lines.push(`Tagged agents: ${agents.map((a) => `${a.name} (id ${a.id})`).join(', ')}`);
   if (repo) lines.push(`Tagged project: ${repo}`);
   return lines.join('\n');
+}
+
+// ---------- fork: Jarvis ----------
+
+// What Jarvis sees besides the office: the sessions outside it and the
+// laptop's open tabs. Put before the boss's message, which ends the context.
+async function withJarvisContext(context) {
+  const extra = [];
+  const outside = observer.list().filter((a) => a.state !== 'idle' || Date.now() - a.updated < 15 * 60_000).slice(0, 20);
+  if (outside.length) {
+    extra.push('Contractors (outside the office):');
+    for (const a of outside) {
+      const where = a.host ? ` on ${a.host}` : '';
+      const kind = a.source === 'claude' ? `Claude Code session${where}` : a.source;
+      extra.push(`- ${a.name} (sessionId ${a.id}, ${kind}${a.project ? `, ${a.project}` : ''}): ${a.state === 'waiting' ? 'WAITING ON THE BOSS' : a.state === 'error' ? 'FAILED' : a.state}. ${clip(a.activity, 120)}${a.title ? ` (asked: "${clip(a.title, 80)}")` : ''}`);
+    }
+  }
+  const tabs = await hands.tabs();
+  if (tabs) {
+    extra.push(`Laptop tabs (${tabs.length}):`);
+    for (const t of tabs.slice(0, 40)) {
+      let host = '';
+      try { host = new URL(t.url).hostname; } catch {}
+      extra.push(`- ${t.active ? '[active] ' : ''}${clip(t.title, 70)} (${host})`);
+    }
+  } else if (hands.configured) extra.push("Laptop: not reachable right now (asleep or off the network).");
+  if (!extra.length) return context;
+  const at = context.lastIndexOf('\nNew message from the boss:');
+  return at < 0 ? `${extra.join('\n')}\n\n${context}` : `${context.slice(0, at)}\n${extra.join('\n')}\n${context.slice(at)}`;
+}
+
+// Carries out a tabs, app or session decision; returns the line to say.
+async function jarvisActs(d) {
+  try {
+    if (d.action === 'tabs') {
+      const op = d.tabOp || 'list';
+      const r = await hands.call('/tabs', { op, url: d.url, query: d.query });
+      if (op === 'list') {
+        const names = (r.tabs || []).slice(0, 6).map((t) => clip(t.title, 40)).join(', ');
+        return `You've got ${(r.tabs || []).length} tabs open${names ? `: ${names}` : ''}.`;
+      }
+      return d.say || 'Done.';
+    }
+    if (d.action === 'app') {
+      await hands.call('/app', { name: d.app });
+      return d.say || `Opening ${d.app}.`;
+    }
+    // session
+    const a = observer.list().find((x) => x.id === d.sessionId || x.sessionId === d.sessionId);
+    const brief = String(d.brief || '').trim();
+    if (!a || a.source !== 'claude' || !a.sessionId) return "I can't find that session.";
+    if (!brief) return 'What should I tell it?';
+    if (a.state === 'working') return `${a.name} is busy right now. I'll leave it be.`;
+    if (a.host) {
+      await hands.call('/session', { sessionId: a.sessionId, message: brief });
+      return d.say || `Passed it to ${a.name}.`;
+    }
+    // A session on this machine becomes an office job on the same session,
+    // so it shows on the floor and its result comes back to the chat.
+    const rel = a.cwd ? path.relative(ROOT, a.cwd) : '';
+    if (!rel || rel.startsWith('..') || rel.includes(path.sep) || !repoPath(rel)) {
+      return `${a.name} lives outside the projects folder, so I can't pick it up from here.`;
+    }
+    const job = createJob({ repo: rel, prompt: brief, mode: 'edit', model: '' }, { sessionId: a.sessionId });
+    job.channel = GENERAL;
+    return d.say || `${a.name} is back on it.`;
+  } catch (err) {
+    return err.message;
+  }
 }
 
 function hireWork({ repo, brief, agentId, mode, model, auto, say, files, thread, inThread, channel }) {
@@ -1718,7 +1792,9 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     const said = files.length
       ? `${text}\n(Attached: ${files.map((f) => f.name).join(', ')}${shown.length ? `. ${shown.length === 1 ? 'The image is' : 'The images are'} attached for you to look at.` : ''})`
       : text;
-    d = await route(chiefContext(said, agents, repo, channel), { bin: CLAUDE, model: settings.get('chiefModel'), images: shown, env: auth.env() });
+    let context = chiefContext(said, agents, repo, channel);
+    if (CHIEF_NAME) context = await withJarvisContext(context);
+    d = await route(context, { bin: CLAUDE, model: settings.get('chiefModel'), images: shown, env: auth.env(), name: CHIEF_NAME });
     state.chiefCost += d.cost || 0;
     nudgeUsage();
   } finally {
@@ -1774,6 +1850,7 @@ async function dispatch(text, mode, model, files, root, inThread, channel) {
     return say(clearContext(ids.length ? ids : hired().map((x) => x.id)));
   }
   if (d.action === 'standup') return void runStandup(true);
+  if (d.action === 'tabs' || d.action === 'app' || d.action === 'session') return say(await jarvisActs(d));
   // An answer that is merely about a job gets the same link a follow-up does.
   // Asking "how did that go?" from another channel shouldn't dead-end just
   // because the job has already finished and nothing was passed on.
@@ -3030,6 +3107,20 @@ const server = http.createServer(async (req, res) => {
       save();
       send({ t: 'tts', ...piperReady(DATA), replies: voiceOn() });
       return json(res, 200, { ok: true, replies: voiceOn() });
+    }
+    // fork: Jarvis's always-on listening. Like /api/voice, but the audio is
+    // thrown away after: most of it is the room, not a message.
+    if (req.method === 'POST' && url.pathname === '/api/voice/listen') {
+      const f = await upload(req);
+      let hint = CHIEF_NAME;
+      try { hint = vocabulary([CHIEF_NAME, ...onFloor().map((s) => s.name)].filter(Boolean), listRepos()); } catch {}
+      try {
+        return json(res, 200, { text: await transcribe(f.path, { dataDir: DATA, prompt: hint }) });
+      } catch (err) {
+        return json(res, 503, { error: err.message });
+      } finally {
+        fs.rm(path.dirname(f.path), { recursive: true, force: true }, () => {});
+      }
     }
     if (req.method === 'POST' && url.pathname === '/api/voice') {
       const f = await upload(req);
